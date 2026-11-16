@@ -1,0 +1,49 @@
+server:
+  address: 127.0.0.1
+  port: 8080
+
+spring:
+  application:
+    name: ollama-chat
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/aitest_rag?createDatabaseIfNotExist=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: "123456"
+    hikari:
+      connection-timeout: 3000
+      maximum-pool-size: 5
+
+app:
+  settings-file: data/settings.json
+  rag:
+    text-dir: F:/aitest-knowledge
+    paddle-python: C:/Users/Administrator/AppData/Local/Programs/Python/Python310/python.exe
+    paddle-script: scripts/paddle_ocr.py
+    qdrant-host: 127.0.0.1
+    qdrant-port: 6334
+    collection: knowledge
+    embedding-dimensions: 1024
+    max-upload-bytes: 20971520
+    chunk-max-chars: 1000
+    breakpoint-percentile: 90
+    ocr-min-chars: 20
+  ollama:
+    base-url: http://127.0.0.1:11434
+    model: qwen3.5:9b
+    system-prompt: 你是一个简洁、可靠的中文助手。回答尽量直接，不确定时说明不确定。
+    temperature: 0.7
+    top-p: 0.9
+    top-k: 40
+    num-ctx: 8192
+    num-predict: -1
+    repeat-penalty: 1.1
+    think: false
+    web-enabled: false
+    web-provider: bing
+    web-search-url: http://127.0.0.1:8888
+    web-max-results: 5
+    web-fetch: true
+    web-max-rounds: 3
+    rag-enabled: false
+    embedding-model: bge-m3
+    rag-top-k: 4

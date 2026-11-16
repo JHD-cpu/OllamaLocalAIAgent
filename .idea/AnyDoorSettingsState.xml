@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AnyDoorSettingsState">
+    <option name="pid" value="15700" />
+    <option name="cache">
+      <map>
+        <entry key="com.aitest.chat.ollama.OllamaAdminClient#longValue#java.lang.Object" value="{&quot;runNum&quot;:1,&quot;content&quot;:&quot;{\&quot;value\&quot;:2}&quot;,&quot;concurrent&quot;:true}" />
+      </map>
+    </option>
+  </component>
+</project>
