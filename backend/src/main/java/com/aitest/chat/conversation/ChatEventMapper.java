@@ -89,6 +89,24 @@ public class ChatEventMapper {
 			else if ("run_cmd".equals(call.name())) {
 				notes.add(event("tool", "执行命令：" + argument(arguments, "command")));
 			}
+			else if ("open_browser".equals(call.name())) {
+				notes.add(event("tool", "打开内嵌浏览器：" + argument(arguments, "url")));
+			}
+			else if ("browser_read_page".equals(call.name())) {
+				notes.add(event("tool", "读取内嵌浏览器页面"));
+			}
+			else if ("open_app".equals(call.name())) {
+				notes.add(event("tool", "打开程序：" + argument(arguments, "name")));
+			}
+			else if ("take_screenshot".equals(call.name())) {
+				notes.add(event("tool", "截取屏幕"));
+			}
+			else if ("memory_save".equals(call.name())) {
+				notes.add(event("tool", "保存记忆：" + argument(arguments, "content")));
+			}
+			else if ("memory_search".equals(call.name())) {
+				notes.add(event("tool", "检索记忆：" + argument(arguments, "query")));
+			}
 			else {
 				notes.add(event("tool", "调用工具：" + call.name()));
 			}

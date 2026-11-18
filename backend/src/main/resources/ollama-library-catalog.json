@@ -1,0 +1,24 @@
+{
+  "items": [
+    { "name": "qwen2.5:7b", "description": "通义千问 2.5 7B，日常中文对话", "category": "chat", "sizeHint": "~4.7GB" },
+    { "name": "qwen2.5:14b", "description": "通义千问 2.5 14B，更强推理", "category": "chat", "sizeHint": "~9GB" },
+    { "name": "qwen3.5:9b", "description": "通义千问 3.5 9B（默认对话模型）", "category": "chat", "sizeHint": "~6GB" },
+    { "name": "qwen2.5-coder:7b", "description": "通义千问代码专用 7B", "category": "chat", "sizeHint": "~4.7GB" },
+    { "name": "llama3.2:3b", "description": "Llama 3.2 3B，轻量英文", "category": "chat", "sizeHint": "~2GB" },
+    { "name": "llama3.1:8b", "description": "Llama 3.1 8B", "category": "chat", "sizeHint": "~4.9GB" },
+    { "name": "gemma3:4b", "description": "Google Gemma 3 4B", "category": "chat", "sizeHint": "~3.3GB" },
+    { "name": "gemma3:12b", "description": "Google Gemma 3 12B", "category": "chat", "sizeHint": "~8GB" },
+    { "name": "mistral:7b", "description": "Mistral 7B", "category": "chat", "sizeHint": "~4.1GB" },
+    { "name": "phi4", "description": "Microsoft Phi-4", "category": "chat", "sizeHint": "~9GB" },
+    { "name": "deepseek-r1:8b", "description": "DeepSeek R1 蒸馏 8B，擅长推理", "category": "chat", "sizeHint": "~5GB" },
+    { "name": "deepseek-r1:14b", "description": "DeepSeek R1 蒸馏 14B", "category": "chat", "sizeHint": "~9GB" },
+    { "name": "llava:7b", "description": "LLaVA 视觉对话 7B", "category": "vision", "sizeHint": "~4.7GB" },
+    { "name": "llama3.2-vision:11b", "description": "Llama 3.2 Vision 11B", "category": "vision", "sizeHint": "~7.9GB" },
+    { "name": "qwen2.5vl:7b", "description": "通义千问视觉 7B", "category": "vision", "sizeHint": "~6GB" },
+    { "name": "minicpm-v", "description": "MiniCPM-V 多模态", "category": "vision", "sizeHint": "~5GB" },
+    { "name": "bge-m3", "description": "BGE-M3 嵌入模型（知识库默认）", "category": "embed", "sizeHint": "~1.2GB" },
+    { "name": "nomic-embed-text", "description": "Nomic 文本嵌入", "category": "embed", "sizeHint": "~274MB" },
+    { "name": "mxbai-embed-large", "description": "Mixedbread 大嵌入模型", "category": "embed", "sizeHint": "~670MB" },
+    { "name": "all-minilm", "description": "轻量句向量模型", "category": "embed", "sizeHint": "~46MB" }
+  ]
+}

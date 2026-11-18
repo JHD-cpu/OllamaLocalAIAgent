@@ -20,10 +20,10 @@ public class WebConfig implements WebFluxConfigurer {
 			.allowedHeaders("*");
 	}
 
-	/** 知识库上传允许到 20MB，默认缓冲只有 256KB。 */
+	/** 上传不设实用体积上限；大文件入库后先粗分片再细切。 */
 	@Override
 	public void configureHttpMessageCodecs(ServerCodecConfigurer configurer) {
-		configurer.defaultCodecs().maxInMemorySize(21 * 1024 * 1024);
+		configurer.defaultCodecs().maxInMemorySize(512 * 1024 * 1024);
 	}
 
 }

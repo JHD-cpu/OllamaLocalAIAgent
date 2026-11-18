@@ -1,9 +1,13 @@
 # Build Electron desktop + bundled Java service.
-# Output: dist\desktop-build\OllamaChat-Setup-1.0.0.exe
+# Output: dist\desktop-build\OllamaChat-Setup-<version>.exe
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 & (Join-Path $root "scripts\stage-backend.ps1") -Root $root
 if ($LASTEXITCODE -ne 0) { throw "stage-backend failed: $LASTEXITCODE" }
+
+$pkg = Get-Content (Join-Path $root "desktop\package.json") -Raw | ConvertFrom-Json
+$version = [string]$pkg.version
+if (-not $version) { throw "desktop package.json version missing" }
 
 Set-Location (Join-Path $root "desktop")
 $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
@@ -23,6 +27,7 @@ $installer = Get-ChildItem (Join-Path $root "dist\desktop-build") -Filter "Ollam
 if (-not $installer) {
     throw "installer not found under dist\desktop-build"
 }
-Copy-Item $installer.FullName (Join-Path $root "dist\OllamaChat-Setup-1.0.0.exe") -Force
+$stableCopy = Join-Path $root "dist\OllamaChat-Setup-$version.exe"
+Copy-Item $installer.FullName $stableCopy -Force
 Write-Output "INSTALLER $($installer.FullName)"
-Write-Output "COPY $(Join-Path $root 'dist\OllamaChat-Setup-1.0.0.exe')"
+Write-Output "COPY $stableCopy"

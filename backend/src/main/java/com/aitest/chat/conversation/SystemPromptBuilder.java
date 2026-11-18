@@ -45,15 +45,13 @@ public class SystemPromptBuilder {
 					: "只有需要实时信息、发生在你的知识截止之后、或你无法确定的事实时，才调用 web_search。已经知道的稳定知识直接回答，不要搜索。是否调用由你决定。";
 			text.append("\n\n").append(note);
 		}
+		text.append("\n\n").append(
+				"主人要求打开网站或网页时，调用 open_browser，在应用内嵌浏览器中打开，可以同时打开多个窗口。不要用 start 或指定 chrome 来打开网站。已经打开的内嵌页面需要阅读或总结时，调用 browser_read_page。");
+		text.append("\n\n").append(
+				"打开本机程序时优先调用 open_app（按名称匹配）。需要看屏幕时调用 take_screenshot。跨会话要记住的用户偏好或事实，用 memory_save / memory_search。");
 		if (settings.codeEnabled()) {
-			String chrome = this.softwareCatalog.chromeExe();
-			String openChrome = chrome == null || chrome.isBlank()
-					? "start chrome https://www.baidu.com"
-					: "start \"\" \"" + chrome + "\" https://www.baidu.com";
 			text.append("\n\n").append(
-					"你运行在主人的 Windows 电脑上，可以执行 cmd。主人要求打开浏览器、网站或其它程序时，调用 run_cmd。打开谷歌浏览器并访问百度的命令是 "
-							+ openChrome
-							+ "。不要说自己无法操作电脑。写代码、改文件时使用 create_file、write_file、read_file、run_file、run_cmd，文件路径相对于工作区。");
+					"你运行在主人的 Windows 电脑上，可以执行 cmd。打开其它本机程序时优先 open_app；复杂命令再用 run_cmd。不要说自己无法操作电脑。写代码、改文件时使用 create_file、write_file、read_file、run_file、run_cmd，文件路径相对于工作区。");
 			String software = this.softwareCatalog.promptSummary();
 			if (software != null && !software.isBlank()) {
 				text.append("\n\n").append(software);

@@ -18,7 +18,9 @@ import com.aitest.chat.knowledge.storage.KnowledgeRepository.StoredChunk;
 import com.aitest.chat.knowledge.storage.KnowledgeRepository;
 import com.aitest.chat.knowledge.indexing.EmbeddingSemanticChunker;
 import com.aitest.chat.knowledge.indexing.DocumentTextReader;
-import com.aitest.chat.knowledge.config.RagProperties;
+import com.aitest.chat.knowledge.indexing.IndexCancelledException;
+import com.aitest.chat.knowledge.indexing.IndexGuard;
+import com.aitest.chat.knowledge.indexing.IndexProgress;
 import com.aitest.chat.api.KnowledgeHit;
 import com.aitest.chat.api.KnowledgeDocumentView;
 import com.aitest.chat.api.KnowledgeChunkView;
@@ -28,8 +30,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -46,7 +50,9 @@ public class KnowledgeService implements DisposableBean {
    private final KnowledgeVectorStore vectorStore;
    private final EmbeddingSemanticChunker chunker;
    private final Object gate = new Object();
-   private final ExecutorService indexer = Executors.newSingleThreadExecutor(task -> {
+   /** 正在入库的文档取消标志：删除时置位，解析/分块循环协作退出。 */
+   private final ConcurrentHashMap<String, AtomicBoolean> cancelFlags = new ConcurrentHashMap<>();
+   private final ExecutorService indexer = Executors.newFixedThreadPool(indexPoolSize(), task -> {
       Thread thread = new Thread(task, "knowledge-index");
       thread.setDaemon(true);
       return thread;
@@ -69,14 +75,15 @@ public class KnowledgeService implements DisposableBean {
       int size = bytes == null ? 0 : bytes.length;
       log.info("收到上传 file={} bytes={}", name, size);
       String extension = DocumentTextReader.extension(name);
-      if (!"pdf".equals(extension) && !"txt".equals(extension) && !"md".equals(extension)) {
-         throw new IllegalArgumentException("只支持 pdf、txt、md");
+      if (!"pdf".equals(extension) && !"txt".equals(extension) && !"md".equals(extension)
+            && !"docx".equals(extension) && !"xlsx".equals(extension) && !"xls".equals(extension)) {
+         throw new IllegalArgumentException("只支持 pdf、txt、md、docx、xlsx");
       } else if (bytes != null && bytes.length != 0) {
          String id = UUID.randomUUID().toString();
          synchronized (this.gate) {
             Path original = this.textStore.writeOriginal(id, name, bytes);
             KnowledgeRepository.StoredDocument stored = new KnowledgeRepository.StoredDocument(
-               id, name, extension, "PROCESSING", null, null, null, original.toString(), null, LocalDateTime.now()
+               id, name, extension, "PROCESSING", null, null, 0, 0, "排队中", original.toString(), null, LocalDateTime.now()
             );
             this.repository.insertDocument(stored);
          }
@@ -94,19 +101,60 @@ public class KnowledgeService implements DisposableBean {
       return this.repository.list().stream().map(KnowledgeService::view).toList();
    }
 
-   /** 删除文档的向量、文件与数据库记录。 */
+   /** 保留原件，清空旧分块/向量后按当前规则重新入库。 */
+   public KnowledgeDocumentView rechunk(String id) {
+      synchronized (this.gate) {
+         KnowledgeRepository.StoredDocument document = this.require(id);
+         if ("PROCESSING".equals(document.status())) {
+            throw new IllegalArgumentException("文档正在分块中，请稍后再试");
+         }
+         if (document.originalPath() == null || document.originalPath().isBlank()) {
+            throw new IllegalArgumentException("找不到原文件，无法重新分块");
+         }
+         Path original = Path.of(document.originalPath());
+         if (!original.toFile().isFile()) {
+            throw new IllegalArgumentException("原文件已丢失，无法重新分块");
+         }
+         log.info("重新分块 id={} file={} status={}", document.id(), document.filename(), document.status());
+         try {
+            this.vectorStore.deleteDocument(id);
+         }
+         catch (RuntimeException ex) {
+            log.warn("重新分块前清理向量失败，继续本地清理 id={}", id, ex);
+         }
+         this.repository.deleteChunksByDocument(id);
+         this.textStore.deleteDerived(id);
+         this.repository.markProcessing(id);
+      }
+      this.indexer.execute(() -> this.index(id));
+      return view(this.repository.find(id).orElseThrow());
+   }
+
+   /** 删除文档的向量、文件与数据库记录；若正在分块则先发取消信号。 */
    public void delete(String id) {
+      AtomicBoolean flag = this.cancelFlags.get(id);
+      if (flag != null) {
+         flag.set(true);
+         log.info("已请求停止分块 id={}", id);
+      }
       synchronized (this.gate) {
          KnowledgeRepository.StoredDocument document = this.repository.find(id).orElseThrow(() -> new IllegalArgumentException("找不到这个文档"));
-         log.info("删除文档 id={} file={} status={}", new Object[]{document.id(), document.filename(), document.status()});
+         log.info("删除文档 id={} file={} status={}", document.id(), document.filename(), document.status());
          if ("FAILED".equals(document.status())) {
             try {
                this.vectorStore.deleteDocument(id);
             } catch (RuntimeException var6) {
                log.warn("删除失败文档时向量库不可用，仍移除本地记录 id={}", id, var6);
             }
-         } else {
+         } else if (!"PROCESSING".equals(document.status())) {
             this.vectorStore.deleteDocument(id);
+         } else {
+            // 处理中：尽量清掉可能已写入的部分向量，忽略失败
+            try {
+               this.vectorStore.deleteDocument(id);
+            } catch (RuntimeException ex) {
+               log.debug("处理中文档删除向量暂不可用 id={}: {}", id, ex.toString());
+            }
          }
 
          this.textStore.deleteAll(id);
@@ -203,10 +251,26 @@ public class KnowledgeService implements DisposableBean {
       }
    }
 
-   /** 后台流水线：解析、切分、写库与建向量。 */
+   /** 后台流水线：解析、切分、写库与建向量；删除时协作停止。 */
    private void index(String id) {
       boolean sentToVectorStore = false;
       long started = System.nanoTime();
+      AtomicBoolean cancelled = new AtomicBoolean(false);
+      this.cancelFlags.put(id, cancelled);
+      IndexGuard guard = () -> {
+         if (cancelled.get() || this.repository.find(id).isEmpty()) {
+            cancelled.set(true);
+            throw new IndexCancelledException(id);
+         }
+      };
+      IndexProgress progress = guard.wrap((percent, message, chunkCount) -> {
+         try {
+            this.repository.updateProgress(id, percent, message, chunkCount);
+         }
+         catch (RuntimeException ex) {
+            log.debug("进度写入失败 id={}: {}", id, ex.toString());
+         }
+      });
 
       try {
          KnowledgeRepository.StoredDocument document = this.repository.find(id).orElse(null);
@@ -215,53 +279,86 @@ public class KnowledgeService implements DisposableBean {
             return;
          }
 
+         progress.update(2, "开始解析", 0);
          log.info("开始解析 id={} file={}", id, document.filename());
-         String text = this.reader.read(document.filename(), Path.of(document.originalPath()));
+         String text = this.reader.read(document.filename(), Path.of(document.originalPath()), progress, guard);
          if (text.isBlank()) {
             throw new IllegalStateException("没有提取到文字");
          }
 
          log.info("文字提取完成 id={} chars={}", id, text.length());
-         List<String> chunks = this.chunker.split(text);
-         log.info("语义切分完成 id={} chunks={}", id, chunks.size());
+         List<String> chunks = this.chunker.split(document.filename(), text, progress, guard);
+         log.info("建议分片完成 id={} chunks={}", id, chunks.size());
          synchronized (this.gate) {
-            if (this.repository.find(id).isEmpty()) {
-               log.info("解析期间文档已删除，取消写入 id={}", id);
-               return;
-            }
-
+            guard.check();
+            progress.update(88, "写入分块与向量", chunks.size());
+            // 重新分块时先清掉残留分块行与文件，避免序号/向量叠旧数据
+            this.repository.deleteChunksByDocument(id);
+            this.textStore.deleteDerived(id);
             Path textPath = this.textStore.writeText(id, text);
             List<Document> vectors = new ArrayList<>();
 
             for (int i = 0; i < chunks.size(); i++) {
+               guard.check();
                String chunkId = UUID.randomUUID().toString();
                Path chunkPath = this.textStore.writeChunk(id, i, chunks.get(i));
                this.repository.insertChunk(chunkId, id, i, chunkPath.toString(), chunks.get(i).length());
                vectors.add(new Document(chunkId, chunks.get(i), Map.of("documentId", id, "chunkId", chunkId, "filename", document.filename())));
+               if (i == 0 || (i + 1) % 5 == 0 || i + 1 == chunks.size()) {
+                  int pct = 88 + (int) Math.round(10.0 * (i + 1) / Math.max(1, chunks.size()));
+                  progress.update(Math.min(98, pct), "写入分块 " + (i + 1) + "/" + chunks.size(), i + 1);
+               }
             }
 
+            guard.check();
+            try {
+               this.vectorStore.deleteDocument(id);
+            }
+            catch (RuntimeException ex) {
+               log.debug("写入前清理旧向量 id={}: {}", id, ex.toString());
+            }
             sentToVectorStore = true;
+            progress.update(98, "写入向量库", chunks.size());
             this.vectorStore.add(vectors);
+            guard.check();
             this.repository.markReady(id, text.length(), chunks.size(), textPath.toString());
          }
 
-         log.info("知识库入库完成 id={} chunks={} 耗时={}ms", new Object[]{id, chunks.size(), (System.nanoTime() - started) / 1000000L});
-      } catch (Exception var19) {
-         Exception ex = var19;
-         log.warn("知识库入库失败 id={}", id, var19);
+         log.info("知识库入库完成 id={} chunks={} 耗时={}ms", id, chunks.size(), (System.nanoTime() - started) / 1000000L);
+      }
+      catch (IndexCancelledException cancelledEx) {
+         log.info("文档已删除，已停止分块 id={} 耗时={}ms", id, (System.nanoTime() - started) / 1000000L);
+         if (sentToVectorStore) {
+            try {
+               this.vectorStore.deleteDocument(id);
+            }
+            catch (RuntimeException ex) {
+               log.debug("取消后清理向量失败 id={}: {}", id, ex.toString());
+            }
+         }
+      }
+      catch (Exception ex) {
+         if (ex.getCause() instanceof IndexCancelledException || cancelled.get()) {
+            log.info("文档已删除，已停止分块 id={}", id);
+            return;
+         }
+         log.error("知识库入库失败 id={}", id, ex);
          synchronized (this.gate) {
             if (this.repository.find(id).isPresent()) {
                if (sentToVectorStore) {
                   try {
                      this.vectorStore.deleteDocument(id);
-                  } catch (RuntimeException var16) {
-                     log.warn("清理失败文档的向量没有成功 id={}", id, var16);
+                  }
+                  catch (RuntimeException cleanup) {
+                     log.warn("清理失败文档的向量没有成功 id={}", id, cleanup);
                   }
                }
-
                this.repository.markFailed(id, brief(ex));
             }
          }
+      }
+      finally {
+         this.cancelFlags.remove(id, cancelled);
       }
    }
 
@@ -286,16 +383,13 @@ public class KnowledgeService implements DisposableBean {
       }
    }
 
-   /** 校验分块非空且不超过长度上限。 */
+   /** 校验分块非空（不做字符数上限，大段由入库分片流程处理）。 */
    private static String cleanChunk(String text) {
       String body = text == null ? "" : text.trim();
       if (body.isEmpty()) {
          throw new IllegalArgumentException("分块内容不能为空");
-      } else if (body.length() > 20000) {
-         throw new IllegalArgumentException("分块不能超过 20000 个字符");
-      } else {
-         return body;
       }
+      return body;
    }
 
    /** 构造带元数据的 Spring AI Document。 */
@@ -322,13 +416,21 @@ public class KnowledgeService implements DisposableBean {
          document.errorMessage(),
          document.charCount(),
          document.chunkCount(),
+         document.progress(),
+         document.progressMessage(),
          document.createdAt()
       );
    }
 
    /** 关闭后台索引线程池。 */
    public void destroy() {
-      this.indexer.shutdown();
+      this.indexer.shutdownNow();
+   }
+
+   /** 并行入库线程数：2–6，随 CPU 核数调整。 */
+   private static int indexPoolSize() {
+      int cores = Runtime.getRuntime().availableProcessors();
+      return Math.max(2, Math.min(6, cores));
    }
 
    /** 原件下载载荷：文件名、MIME 与内容。 */

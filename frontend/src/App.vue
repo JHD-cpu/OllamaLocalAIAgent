@@ -1,236 +1,301 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import ChatPane from './components/ChatPane.vue'
-import SettingsPanel from './components/SettingsPanel.vue'
-import { getDefaults, getInfo, getSettings, probeOllama, saveSettings, streamChat } from './api'
+import { computed, onMounted, ref, watch } from 'vue'
+import {
+  ChatDotRound,
+  Collection,
+  EditPen,
+  Expand,
+  Fold,
+  Plus,
+  Setting
+} from '@element-plus/icons-vue'
+import ChatPane from './features/chat/ChatPane.vue'
+import SessionSidebar from './features/chat/SessionSidebar.vue'
+import KnowledgeGraphPage from './features/knowledge/KnowledgeGraphPage.vue'
+import KnowledgePane from './features/knowledge/KnowledgePane.vue'
+import SettingsPanel from './features/settings/SettingsPanel.vue'
+import { getLogInfo } from './api'
+import { useChatSession } from './composables/useChatSession.js'
+import { useOllamaInfo } from './composables/useOllamaInfo.js'
+import { useSettings } from './composables/useSettings.js'
+import { notifyError, notifySuccess } from './utils/notify.js'
 
-// form 是正在编辑的配置，saved 是上次成功保存的副本，两者不同就显示「未保存」。
-const form = reactive(emptySettings())
-const saved = ref(emptySettings())
-const defaults = ref(emptySettings())
-const models = ref([])
-const info = ref({ ok: false, version: '', message: '正在检查 Ollama…', models: [] })
-const messages = ref([])
-const draft = ref('')
-const streaming = ref(false)
-const chatError = ref('')
-const settingsError = ref('')
-const probeMessage = ref('')
-const settingsOpen = ref(false)
-const saving = ref(false)
-const probing = ref(false)
-// 当前这次流式请求的取消句柄。停止生成时调用 abort。
-let abortController = null
-
-const dirty = computed(() => JSON.stringify(form) !== JSON.stringify(saved.value))
-const statusText = computed(() => {
-  if (info.value.ok) {
-    return `已连接 ${info.value.version}`
+function resolveInitialView() {
+  try {
+    const q = new URLSearchParams(window.location.search)
+    if (q.get('view') === 'knowledge-graph') {
+      return 'knowledge-graph'
+    }
   }
-  return info.value.message || '未连接'
+  catch {
+    /* ignore */
+  }
+  return 'chat'
+}
+
+const view = ref(resolveInitialView())
+const graphOnly = computed(() => view.value === 'knowledge-graph')
+const sidebarOpen = ref(false)
+const logPath = ref('')
+const {
+  form,
+  saved,
+  loaded,
+  loadError,
+  models,
+  providers,
+  settingsError,
+  probeMessage,
+  settingsOpen,
+  saving,
+  probing,
+  dirty,
+  applySettings,
+  load,
+  save,
+  probe,
+  reset,
+  syncWebPrompt,
+  applyProviderPreset
+} = useSettings()
+
+const { info, statusText, refreshInfo } = useOllamaInfo(models)
+const {
+  sessions,
+  sessionId,
+  messages,
+  draft,
+  draftAttachments,
+  streaming,
+  chatError,
+  featuresBusy,
+  sessionsLoading,
+  loadSessions,
+  selectSession,
+  onNewSession,
+  onRenameSession,
+  onDeleteSession,
+  onToggleFeature,
+  onSend,
+  onRegenerate,
+  onStop,
+  onClear,
+  exportMarkdown
+} = useChatSession({
+  form,
+  applySettings,
+  syncWebPrompt
 })
 
-// 接口还没返回时用的占位配置，字段要和后端 AppSettings 对齐。
-function emptySettings() {
-  return {
-    baseUrl: 'http://127.0.0.1:11434',
-    model: 'qwen3.5:9b',
-    systemPrompt: '',
-    temperature: 0.7,
-    topP: 0.9,
-    topK: 40,
-    numCtx: 8192,
-    numPredict: -1,
-    repeatPenalty: 1.1,
-    think: false,
-    webEnabled: false,
-    webProvider: 'bing',
-    webSearchUrl: 'http://127.0.0.1:8888',
-    webMaxResults: 5,
-    webFetch: true,
-    webMaxRounds: 3
+const currentTitle = computed(() => {
+  if (view.value === 'knowledge') {
+    return '知识库'
   }
-}
+  const hit = sessions.value.find((s) => s.id === sessionId.value)
+  return hit?.title || '新对话'
+})
 
-// 用服务端返回的配置同时填表单和「已保存」副本，避免刚加载就被当成未保存。
-function applySettings(value) {
-  Object.assign(form, value)
-  saved.value = { ...value }
-}
+watch(loadError, (value) => {
+  if (value) {
+    notifyError(value)
+  }
+})
+watch(settingsError, (value) => {
+  if (value) {
+    notifyError(value)
+  }
+})
+watch(chatError, (value) => {
+  if (value) {
+    notifyError(value)
+  }
+})
 
 onMounted(async () => {
   try {
-    const [current, base] = await Promise.all([getSettings(), getDefaults()])
-    applySettings(current)
-    defaults.value = base
-    await refreshInfo()
+    await load()
+    if (!graphOnly.value) {
+      await refreshInfo()
+      await loadSessions()
+    }
+    try {
+      const log = await getLogInfo()
+      logPath.value = log?.path || ''
+    }
+    catch {
+      /* ignore */
+    }
   }
   catch (error) {
+    loadError.value = error.message
     info.value = { ok: false, version: '', message: error.message, models: [] }
   }
 })
 
-// 用已保存的地址刷新连接状态和模型列表。
-async function refreshInfo() {
-  const result = await getInfo()
-  info.value = result
-  models.value = result.models || []
-}
-
-// 保存当前表单。成功后用返回值覆盖本地状态，再重新探测 Ollama。
 async function onSave() {
-  saving.value = true
-  settingsError.value = ''
-  probeMessage.value = ''
   try {
-    const stored = await saveSettings({ ...form })
-    applySettings(stored)
+    await save()
     await refreshInfo()
+    notifySuccess('配置已保存')
   }
-  catch (error) {
-    settingsError.value = error.message
-  }
-  finally {
-    saving.value = false
+  catch {
+    /* settingsError already set */
   }
 }
 
-// 只测试表单里的地址，不写入配置。成功时刷新可选模型，失败写到设置错误。
 async function onProbe() {
-  probing.value = true
-  settingsError.value = ''
-  probeMessage.value = ''
   try {
-    const result = await probeOllama(form.baseUrl)
-    models.value = result.models || []
-    if (result.ok) {
-      probeMessage.value = `连接成功，Ollama ${result.version}，共 ${models.value.length} 个模型`
-    }
-    else {
-      settingsError.value = result.message
-    }
+    await probe()
   }
-  catch (error) {
-    settingsError.value = error.message
-  }
-  finally {
-    probing.value = false
+  catch {
+    /* settingsError already set */
   }
 }
 
-// 把表单填回默认值，但还不保存，需要再点保存才会生效。
-function onReset() {
-  Object.assign(form, defaults.value)
-  settingsError.value = ''
-  probeMessage.value = ''
+function onExport() {
+  const text = exportMarkdown()
+  const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `chat-${sessionId.value || 'export'}.md`
+  a.click()
+  URL.revokeObjectURL(url)
+  notifySuccess('已导出 Markdown')
 }
 
-// 发送一条消息：先在列表里放上用户气泡和空的助手气泡，再把 SSE 事件拼进去。
-async function onSend() {
-  const text = draft.value.trim()
-  if (!text || streaming.value) {
-    return
-  }
-  chatError.value = ''
-  messages.value.push({ role: 'user', content: text, thinking: '' })
-  messages.value.push({ role: 'assistant', content: '', thinking: '', tools: [] })
-  draft.value = ''
-  streaming.value = true
-  abortController = new AbortController()
-  // 请求不带刚插入的空助手消息，只带已经完成的历史。
-  const history = messages.value.slice(0, -1).map(({ role, content }) => ({ role, content }))
-  const assistant = messages.value[messages.value.length - 1]
-  try {
-    await streamChat(history, {
-      signal: abortController.signal,
-      onEvent(event) {
-        // thinking 和 content 都是增量，tool 是一条独立的进度说明。
-        if (event.type === 'thinking') {
-          assistant.thinking += event.text
-        }
-        else if (event.type === 'content') {
-          assistant.content += event.text
-        }
-        else if (event.type === 'tool') {
-          assistant.tools.push(event.text)
-        }
-        else if (event.type === 'error') {
-          chatError.value = event.text
-        }
-      }
-    })
-  }
-  catch (error) {
-    // 用户点停止会触发 AbortError，这不是失败，不显示错误。
-    if (error.name !== 'AbortError') {
-      chatError.value = error.message
-    }
-  }
-  finally {
-    streaming.value = false
-    abortController = null
-    // 一点内容都没有（例如立刻停止）时拿掉空的助手气泡。
-    if (assistant && !assistant.content && !assistant.thinking && assistant.tools.length === 0) {
-      messages.value.pop()
-    }
-  }
+function onSelectSession(id) {
+  selectSession(id)
+  sidebarOpen.value = false
 }
 
-// 中断正在进行的流式请求。后端会停，前端在 onSend 的 finally 里收尾。
-function onStop() {
-  abortController?.abort()
-}
-
-function onClear() {
-  if (streaming.value) {
-    return
-  }
-  messages.value = []
-  chatError.value = ''
+function onCreateSession() {
+  onNewSession()
+  sidebarOpen.value = false
+  view.value = 'chat'
 }
 </script>
 
 <template>
-  <div class="app">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Ollama</p>
-        <h1>本地对话</h1>
+  <div class="shell agent-shell" :class="{ 'graph-only-shell': graphOnly }">
+    <header v-if="!graphOnly" class="agent-top">
+      <div class="agent-top-left">
+        <button
+          type="button"
+          class="icon-btn"
+          :title="sidebarOpen ? '收起会话' : '会话列表'"
+          @click="sidebarOpen = !sidebarOpen"
+        >
+          <el-icon :size="18"><component :is="sidebarOpen ? Fold : Expand" /></el-icon>
+        </button>
+        <button type="button" class="icon-btn" title="新对话" :disabled="streaming" @click="onCreateSession">
+          <el-icon :size="18"><EditPen /></el-icon>
+        </button>
       </div>
-      <div class="topbar-side">
-        <p class="model-name">{{ saved.model }}<template v-if="saved.webEnabled"> · 可联网</template></p>
-        <p class="status" :class="{ online: info.ok }">{{ statusText }}</p>
-        <!-- 窄屏才显示这个按钮；宽屏配置栏一直在右侧。 -->
-        <button type="button" class="ghost menu" @click="settingsOpen = !settingsOpen">
-          {{ settingsOpen ? '关闭配置' : '配置' }}
+
+      <div class="agent-top-center">
+        <h1 class="agent-title">{{ currentTitle }}</h1>
+        <p class="agent-disclaimer">AI 生成内容可能有误，请核实 · {{ statusText }}</p>
+      </div>
+
+      <div class="agent-top-right">
+        <div class="view-switch">
+          <button
+            type="button"
+            class="view-chip"
+            :class="{ on: view === 'chat' }"
+            @click="view = 'chat'"
+          >
+            <el-icon><ChatDotRound /></el-icon>
+            对话
+          </button>
+          <button
+            type="button"
+            class="view-chip"
+            :class="{ on: view === 'knowledge' }"
+            @click="view = 'knowledge'"
+          >
+            <el-icon><Collection /></el-icon>
+            知识库
+          </button>
+        </div>
+        <button type="button" class="icon-btn" title="配置" :disabled="!loaded" @click="settingsOpen = true">
+          <el-icon :size="18"><Setting /></el-icon>
         </button>
       </div>
     </header>
 
-    <main class="workspace" :class="{ 'settings-open': settingsOpen }">
-      <ChatPane
-        :messages="messages"
-        :draft="draft"
-        :streaming="streaming"
-        :error="chatError"
-        :model="saved.model"
-        @update:draft="draft = $event"
-        @send="onSend"
-        @stop="onStop"
-        @clear="onClear"
+    <div
+      v-if="!graphOnly && sidebarOpen"
+      class="sidebar-mask"
+      @click="sidebarOpen = false"
+    />
+    <aside v-if="!graphOnly" class="agent-sidebar" :class="{ open: sidebarOpen }">
+      <div class="agent-sidebar-head">
+        <span>会话</span>
+        <button type="button" class="icon-btn" title="新建" :disabled="streaming" @click="onCreateSession">
+          <el-icon><Plus /></el-icon>
+        </button>
+      </div>
+      <SessionSidebar
+        :sessions="sessions"
+        :session-id="sessionId"
+        :loading="sessionsLoading"
+        :disabled="streaming"
+        @select="onSelectSession"
+        @create="onCreateSession"
+        @rename="onRenameSession"
+        @delete="onDeleteSession"
       />
-      <SettingsPanel
-        :form="form"
-        :models="models"
-        :dirty="dirty"
-        :saving="saving"
-        :probing="probing"
-        :error="settingsError"
-        :probe-message="probeMessage"
-        @save="onSave"
-        @probe="onProbe"
-        @reset="onReset"
-      />
+    </aside>
+
+    <main class="agent-body" :class="{ 'graph-only-body': graphOnly }">
+      <el-alert v-if="loadError" type="error" :title="loadError" show-icon :closable="false" />
+      <template v-else-if="loaded">
+        <KnowledgeGraphPage v-if="graphOnly" />
+        <ChatPane
+          v-else-if="view === 'chat'"
+          :messages="messages"
+          :draft="draft"
+          :draft-attachments="draftAttachments"
+          :streaming="streaming"
+          :error="chatError"
+          :model="saved.model"
+          :think="!!saved.think"
+          :web-enabled="!!saved.webEnabled"
+          :rag-enabled="!!saved.ragEnabled"
+          :code-enabled="!!saved.codeEnabled"
+          :features-busy="featuresBusy"
+          @update:draft="draft = $event"
+          @update:draft-attachments="draftAttachments = $event"
+          @send="onSend"
+          @stop="onStop"
+          @clear="onClear"
+          @toggle-feature="onToggleFeature"
+          @regenerate="onRegenerate"
+          @export="onExport"
+        />
+        <KnowledgePane v-else />
+      </template>
     </main>
   </div>
+
+  <SettingsPanel
+    v-if="!graphOnly"
+    v-model="settingsOpen"
+    :form="form"
+    :models="models"
+    :providers="providers"
+    :dirty="dirty"
+    :saving="saving"
+    :probing="probing"
+    :error="settingsError"
+    :probe-message="probeMessage"
+    :log-path="logPath"
+    @save="onSave"
+    @probe="onProbe"
+    @reset="reset"
+    @models-changed="refreshInfo"
+    @provider-change="applyProviderPreset"
+  />
 </template>

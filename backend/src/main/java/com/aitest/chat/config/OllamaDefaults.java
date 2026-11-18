@@ -5,11 +5,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import com.aitest.chat.settings.AppSettings;
 
 /**
- * 绑定 application.yml 里的 app.ollama.*。默认值只写在那一处，这里不再重复。
- * 字段和 {@link AppSettings} 一一对应，getter/setter 只为了让 Spring 绑定配置。
+ * 绑定 application.yml 里的 app.ollama.*。默认值只写在那一处。
  */
 @ConfigurationProperties(prefix = "app.ollama")
 public class OllamaDefaults {
+
+	private String llmProvider = "ollama";
+
+	private String apiKey = "";
 
 	private String baseUrl;
 
@@ -25,7 +28,6 @@ public class OllamaDefaults {
 
 	private int numCtx;
 
-	/** -1 表示不限制单次生成长度。 */
 	private int numPredict;
 
 	private double repeatPenalty;
@@ -58,11 +60,27 @@ public class OllamaDefaults {
 
 	private int codeMaxRounds;
 
-	/** 组装成一份尚未校验的配置，调用方会再走 AppSettings.normalize。 */
 	public AppSettings toSettings() {
-		return new AppSettings(baseUrl, model, systemPrompt, temperature, topP, topK, numCtx, numPredict, repeatPenalty,
-				think, webEnabled, webProvider, webSearchUrl, webMaxResults, webFetch, webMaxRounds, ragEnabled,
-				embeddingModel, ragTopK, codeEnabled, codeWorkspace, codeTimeoutSeconds, codeMaxRounds);
+		return new AppSettings(llmProvider, apiKey, baseUrl, model, systemPrompt, temperature, topP, topK, numCtx,
+				numPredict, repeatPenalty, think, webEnabled, webProvider, webSearchUrl, webMaxResults, webFetch,
+				webMaxRounds, ragEnabled, embeddingModel, ragTopK, codeEnabled, codeWorkspace, codeTimeoutSeconds,
+				codeMaxRounds);
+	}
+
+	public String getLlmProvider() {
+		return llmProvider;
+	}
+
+	public void setLlmProvider(String llmProvider) {
+		this.llmProvider = llmProvider;
+	}
+
+	public String getApiKey() {
+		return apiKey;
+	}
+
+	public void setApiKey(String apiKey) {
+		this.apiKey = apiKey;
 	}
 
 	public String getBaseUrl() {

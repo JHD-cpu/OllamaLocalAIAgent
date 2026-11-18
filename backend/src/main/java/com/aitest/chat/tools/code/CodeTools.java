@@ -144,9 +144,9 @@ public class CodeTools {
    /** 在 Windows 上经 cmd 执行单条命令（含 start 打开程序）。 */
    @Tool(
       name = "run_cmd",
-      description = "在这台 Windows 电脑上执行一条 cmd 命令。打开程序或网站时用 start，例如 start chrome https://www.baidu.com。检查代码时也可以用它。"
+      description = "在这台 Windows 电脑上执行一条 cmd 命令。打开网站请用 open_browser，打开本机程序请优先用 open_app；本工具用于检查代码或其它命令。"
    )
-   public String runCmd(@ToolParam(description = "cmd 命令，例如 start chrome https://www.baidu.com",required = true) String command) {
+   public String runCmd(@ToolParam(description = "cmd 命令，例如 dir 或 python -V", required = true) String command) {
       String text = command == null ? "" : command.trim();
       if (!text.isEmpty() && text.length() <= 2000) {
          log.info("执行命令 {}", text.length() > 120 ? text.substring(0, 120) + "…" : text);

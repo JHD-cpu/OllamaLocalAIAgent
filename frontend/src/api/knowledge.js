@@ -25,6 +25,14 @@ export async function deleteDocument(id) {
   }
 }
 
+/** 保留原件，按当前规则重新分块。 */
+export function rechunkDocument(id) {
+  return request(`/api/knowledge/documents/${encodeURIComponent(id)}/rechunk`, {
+    method: 'POST',
+    body: '{}'
+  })
+}
+
 /** 构造文档原文件预览/下载 URL。 */
 export function originalUrl(id, filename) {
   const name = encodeURIComponent(String(filename || 'file').replaceAll('/', '_'))

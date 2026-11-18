@@ -2,31 +2,41 @@ package com.aitest.chat.settings;
 
 import java.net.URI;
 
-/**
- * 一份完整的应用配置：Ollama 地址和采样参数、联网搜索、知识库检索，以及代码工具。
- * 字段都经过 {@link #normalize(AppSettings)} 校验后才会保存或使用。
- * numPredict 为 -1 表示不限制生成长度，-2 表示尽量把上下文填满。
- */
-public record AppSettings(String baseUrl, String model, String systemPrompt, double temperature, double topP, int topK,
-		int numCtx, int numPredict, double repeatPenalty, boolean think, boolean webEnabled, String webProvider,
-		String webSearchUrl, int webMaxResults, boolean webFetch, int webMaxRounds, boolean ragEnabled,
-		String embeddingModel, int ragTopK, boolean codeEnabled, String codeWorkspace, int codeTimeoutSeconds,
-		int codeMaxRounds) {
+import com.aitest.chat.llm.LlmProvider;
 
-	/** 打开联网时追加到系统提示词末尾的固定说明。 */
+/**
+ * 一份完整的应用配置：模型提供方（本机 Ollama 或远程 OpenAI 兼容）、采样参数、联网、知识库与代码工具。
+ */
+public record AppSettings(String llmProvider, String apiKey, String baseUrl, String model, String systemPrompt,
+		double temperature, double topP, int topK, int numCtx, int numPredict, double repeatPenalty, boolean think,
+		boolean webEnabled, String webProvider, String webSearchUrl, int webMaxResults, boolean webFetch,
+		int webMaxRounds, boolean ragEnabled, String embeddingModel, int ragTopK, boolean codeEnabled,
+		String codeWorkspace, int codeTimeoutSeconds, int codeMaxRounds) {
+
 	public static final String WEB_PROMPT = "对于实时信息联网查询相关信息，不确定时列出所有可能的信息；";
 
-	/**
-	 * 校验并整理一份配置。空白会被裁掉，尾部斜杠会被去掉。
-	 * 缺字段时的默认值由 SettingsService 用 application.yml 补上，这里只拒绝不合法的值。
-	 */
+	public LlmProvider provider() {
+		return LlmProvider.from(this.llmProvider);
+	}
+
 	public static AppSettings normalize(AppSettings raw) {
 		if (raw == null) {
 			throw new IllegalArgumentException("配置不能为空");
 		}
-		String baseUrl = normalizeBaseUrl(raw.baseUrl());
+		LlmProvider provider = LlmProvider.from(raw.llmProvider());
+		String apiKey = normalizeApiKey(raw.apiKey());
+		if (provider.requiresApiKey() && apiKey.isEmpty()) {
+			throw new IllegalArgumentException(provider.label() + " 需要填写 API Key");
+		}
+		if (apiKey.length() > 512) {
+			throw new IllegalArgumentException("API Key 过长");
+		}
+		String baseUrl = normalizeBaseUrl(raw.baseUrl(), provider);
 		String model = raw.model() == null ? "" : raw.model().trim();
-		if (model.isEmpty() || model.length() > 128 || containsWhitespace(model)) {
+		if (model.isEmpty() || model.length() > 200) {
+			throw new IllegalArgumentException("模型名称不正确");
+		}
+		if (provider == LlmProvider.OLLAMA && containsWhitespace(model)) {
 			throw new IllegalArgumentException("模型名称不正确");
 		}
 		String systemPrompt = applyWebPrompt(raw.systemPrompt(), raw.webEnabled());
@@ -45,7 +55,6 @@ public record AppSettings(String baseUrl, String model, String systemPrompt, dou
 		if (raw.numCtx() < 512 || raw.numCtx() > 131072) {
 			throw new IllegalArgumentException("上下文长度需要在 512 到 131072 之间");
 		}
-		/* -1、-2 是 Ollama 的特殊值，0 没有意义，所以单独排除。 */
 		if (raw.numPredict() == 0 || raw.numPredict() < -2 || raw.numPredict() > 131072) {
 			throw new IllegalArgumentException("最大生成长度需要是 -1、-2，或 1 到 131072");
 		}
@@ -61,7 +70,7 @@ public record AppSettings(String baseUrl, String model, String systemPrompt, dou
 			webSearchUrl = webSearchUrl.substring(0, webSearchUrl.length() - 1);
 		}
 		if ("searxng".equals(webProvider)) {
-			webSearchUrl = normalizeBaseUrl(webSearchUrl);
+			webSearchUrl = normalizeHttpBase(webSearchUrl, "SearXNG 地址");
 		}
 		else if (!webSearchUrl.isEmpty() && !webSearchUrl.startsWith("http://") && !webSearchUrl.startsWith("https://")) {
 			throw new IllegalArgumentException("SearXNG 地址需要以 http:// 或 https:// 开头");
@@ -73,7 +82,7 @@ public record AppSettings(String baseUrl, String model, String systemPrompt, dou
 			throw new IllegalArgumentException("检索次数至少为 1");
 		}
 		String embeddingModel = raw.embeddingModel() == null ? "" : raw.embeddingModel().trim();
-		if (embeddingModel.isEmpty() || embeddingModel.length() > 128 || containsWhitespace(embeddingModel)) {
+		if (embeddingModel.isEmpty() || embeddingModel.length() > 128) {
 			throw new IllegalArgumentException("嵌入模型名称不正确");
 		}
 		if (raw.ragTopK() < 1) {
@@ -89,13 +98,13 @@ public record AppSettings(String baseUrl, String model, String systemPrompt, dou
 		if (raw.codeMaxRounds() < 1) {
 			throw new IllegalArgumentException("代码生成轮次至少为 1");
 		}
-		return new AppSettings(baseUrl, model, systemPrompt, raw.temperature(), raw.topP(), raw.topK(), raw.numCtx(),
-				raw.numPredict(), raw.repeatPenalty(), raw.think(), raw.webEnabled(), webProvider, webSearchUrl,
-				raw.webMaxResults(), raw.webFetch(), raw.webMaxRounds(), raw.ragEnabled(), embeddingModel,
-				raw.ragTopK(), raw.codeEnabled(), codeWorkspace, raw.codeTimeoutSeconds(), raw.codeMaxRounds());
+		return new AppSettings(provider.id(), apiKey, baseUrl, model, systemPrompt, raw.temperature(), raw.topP(),
+				raw.topK(), raw.numCtx(), raw.numPredict(), raw.repeatPenalty(), raw.think(), raw.webEnabled(),
+				webProvider, webSearchUrl, raw.webMaxResults(), raw.webFetch(), raw.webMaxRounds(), raw.ragEnabled(),
+				embeddingModel, raw.ragTopK(), raw.codeEnabled(), codeWorkspace, raw.codeTimeoutSeconds(),
+				raw.codeMaxRounds());
 	}
 
-	/** 按联网开关增删固定的联网说明句，避免重复叠加。 */
 	static String applyWebPrompt(String prompt, boolean webEnabled) {
 		String text = prompt == null ? "" : prompt.replace(WEB_PROMPT, "").trim();
 		if (!webEnabled) {
@@ -104,25 +113,46 @@ public record AppSettings(String baseUrl, String model, String systemPrompt, dou
 		return text.isEmpty() ? WEB_PROMPT : text + WEB_PROMPT;
 	}
 
-	/**
-	 * 整理 Ollama 或 SearXNG 的基址：去掉尾部斜杠，要求 http(s)，并且必须有主机和端口。
-	 */
 	public static String normalizeBaseUrl(String value) {
+		return normalizeBaseUrl(value, LlmProvider.OLLAMA);
+	}
+
+	public static String normalizeBaseUrl(String value, LlmProvider provider) {
+		String label = provider == LlmProvider.OLLAMA ? "Ollama 地址" : "接口地址";
+		String baseUrl = value == null ? "" : value.trim();
+		if (baseUrl.isEmpty()) {
+			baseUrl = provider.defaultBaseUrl();
+		}
+		return normalizeHttpBase(baseUrl, label);
+	}
+
+	private static String normalizeHttpBase(String value, String label) {
 		String baseUrl = value == null ? "" : value.trim();
 		while (baseUrl.endsWith("/")) {
 			baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
 		}
 		if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-			throw new IllegalArgumentException("Ollama 地址需要以 http:// 或 https:// 开头");
+			throw new IllegalArgumentException(label + "需要以 http:// 或 https:// 开头");
 		}
 		URI uri = URI.create(baseUrl);
-		if (uri.getHost() == null || uri.getPort() == 0) {
-			throw new IllegalArgumentException("Ollama 地址不正确");
+		if (uri.getHost() == null) {
+			throw new IllegalArgumentException(label + "不正确");
 		}
 		return baseUrl;
 	}
 
-	/** 模型名不允许空格，Ollama 的模型标识是一整段。 */
+	/** 去掉首尾空白、零宽字符，以及误粘贴的 Bearer 前缀。 */
+	static String normalizeApiKey(String raw) {
+		if (raw == null) {
+			return "";
+		}
+		String key = raw.replace("\u200b", "").replace("\ufeff", "").trim();
+		if (key.regionMatches(true, 0, "Bearer ", 0, 7)) {
+			key = key.substring(7).trim();
+		}
+		return key;
+	}
+
 	private static boolean containsWhitespace(String value) {
 		for (int i = 0; i < value.length(); i++) {
 			if (Character.isWhitespace(value.charAt(i))) {

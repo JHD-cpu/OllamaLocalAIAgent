@@ -90,12 +90,17 @@ public class TextStore {
    /** 删除某文档的全部本地文本与原件。 */
    public void deleteAll(String id) {
       deleteTree(this.root.resolve("originals").resolve(id));
-      deleteTree(this.root.resolve("chunks").resolve(id));
+      deleteDerived(id);
+   }
 
+   /** 删除解析全文与分块文件，保留上传原件（供重新分块）。 */
+   public void deleteDerived(String id) {
+      deleteTree(this.root.resolve("chunks").resolve(id));
       try {
          Files.deleteIfExists(this.root.resolve("texts").resolve(id + ".txt"));
-      } catch (IOException var3) {
-         throw new IllegalStateException("删除文本失败", var3);
+      }
+      catch (IOException ex) {
+         throw new IllegalStateException("删除文本失败", ex);
       }
    }
 

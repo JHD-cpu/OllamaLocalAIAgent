@@ -1,27 +1,49 @@
-// 轮询式展示 Ollama 连接状态并将模型列表写入外部 ref。
+// 维护当前 LLM 提供方连接状态（本机 Ollama 或远程）；不再引导自动安装 Ollama/模型。
 import { computed, ref } from 'vue'
-import { getInfo } from '../api'
+import { getLlmInfo } from '../api'
 
-/** 维护 Ollama 健康状态文案，并提供 refreshInfo 拉取最新信息。 */
+/** 维护连接状态文案，并提供 refreshInfo。 */
 export function useOllamaInfo(modelsRef) {
-  const info = ref({ ok: false, version: '', message: '正在检查 Ollama…', models: [] })
+  const info = ref({
+    ok: false,
+    version: '',
+    message: '正在检查模型服务…',
+    models: [],
+    provider: 'ollama',
+    providerLabel: '本机 Ollama',
+    remote: false
+  })
 
-  // 连接成功时显示版本，否则显示错误或「未连接」。
   const statusText = computed(() => {
     if (info.value.ok) {
-      return `已连接 ${info.value.version}`
+      const label = info.value.providerLabel || info.value.provider || '模型'
+      return `${label} · ${info.value.version || '已连接'}`
     }
     return info.value.message || '未连接'
   })
 
-  /** 请求后端 Ollama 信息并可选同步模型列表。 */
-  async function refreshInfo() {
-    const result = await getInfo()
-    info.value = result
-    if (modelsRef) {
-      modelsRef.value = result.models || []
+  function applyInfo(result) {
+    info.value = {
+      ok: !!result?.ok,
+      version: result?.version || '',
+      message: result?.message || '',
+      models: result?.models || [],
+      provider: result?.provider || 'ollama',
+      providerLabel: result?.providerLabel || '',
+      remote: !!result?.remote,
+      baseUrl: result?.baseUrl || '',
+      model: result?.model || ''
     }
-    return result
+    if (modelsRef) {
+      modelsRef.value = (result?.models || []).map((m) =>
+        typeof m === 'string' ? { name: m } : { name: m.name || m.id || '', ...m }
+      )
+    }
+    return info.value
+  }
+
+  async function refreshInfo() {
+    return applyInfo(await getLlmInfo())
   }
 
   return { info, statusText, refreshInfo }

@@ -6,7 +6,13 @@ export async function streamChat(messages, { onEvent, signal }) {
   const response = await fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({
+      messages: messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        images: Array.isArray(m.images) && m.images.length ? m.images : undefined
+      }))
+    }),
     signal
   })
   if (!response.ok) {

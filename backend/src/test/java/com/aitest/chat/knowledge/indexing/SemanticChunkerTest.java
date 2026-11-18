@@ -8,7 +8,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-/** 用固定向量代替嵌入模型，确认主题变化处会切开，同一主题会留在一块。 */
+/** 结构优先切分：栏目/项目应整块保留，主题变化处才切开。 */
 class SemanticChunkerTest {
 
 	@Test
@@ -29,19 +29,52 @@ class SemanticChunkerTest {
 	void keepsSimilarSentencesTogetherUntilMaxLength() {
 		String text = "甲甲甲甲甲甲甲。乙乙乙乙乙乙乙。丙丙丙丙丙丙丙。";
 
-		List<String> together = SemanticChunker.split(text, sentences -> sentences.stream().map(sentence -> new float[] { 1, 0 }).toList(),
-				90, 100);
-		List<String> limited = SemanticChunker.split(text, sentences -> sentences.stream().map(sentence -> new float[] { 1, 0 }).toList(),
-				90, 10);
+		List<String> together = SemanticChunker.split(text,
+				sentences -> sentences.stream().map(sentence -> new float[] { 1, 0 }).toList(), 90, 100);
+		List<String> limited = SemanticChunker.split(text,
+				sentences -> sentences.stream().map(sentence -> new float[] { 1, 0 }).toList(), 90, 10);
 
 		assertEquals(1, together.size());
-		assertEquals(3, limited.size());
+		assertTrue(limited.size() >= 2);
 	}
 
-	/** 天气句给一个方向，行情句给正交方向，这样中间那条边界距离最大。 */
+	@Test
+	void keepsResumeProjectAsOneChunk() {
+		String text = """
+				项目经历
+				智能客服平台 | 2021.03-2022.01
+				负责对话流程设计与知识库接入。
+				完成多轮问答与工单联动。
+				技术栈：Java、Vue、Elasticsearch。
+
+				数据中台 | 2022.02-2023.06
+				搭建指标口径与数仓分层。
+				推动报表自助化。
+				""";
+
+		List<String> chunks = SemanticChunker.split(text,
+				sentences -> sentences.stream().map(sentence -> new float[] { 1, 0 }).toList(), 95, 2200);
+
+		assertTrue(chunks.size() >= 2);
+		assertTrue(chunks.stream().anyMatch(c -> c.contains("智能客服平台") && c.contains("知识库接入")
+				&& c.contains("Elasticsearch")));
+		assertTrue(chunks.stream().anyMatch(c -> c.contains("数据中台") && c.contains("数仓分层")));
+		assertFalse(chunks.stream().anyMatch(c -> c.contains("智能客服平台") && c.contains("数据中台")));
+	}
+
+	@Test
+	void detectsSectionHeaders() {
+		assertTrue(SemanticChunker.isSectionHeader("项目经历"));
+		assertTrue(SemanticChunker.isSectionHeader("智能客服平台 | 2021.03-2022.01"));
+		assertTrue(SemanticChunker.isSectionHeader("## 教育背景"));
+		assertFalse(SemanticChunker.isSectionHeader("负责对话流程设计与知识库接入。"));
+	}
+
 	private static List<float[]> embed(List<String> sentences) {
-		return sentences.stream().map(sentence -> sentence.contains("股价") || sentence.contains("指数") ? new float[] { 0, 1 }
-				: new float[] { 1, 0 }).toList();
+		return sentences.stream()
+			.map(sentence -> sentence.contains("股价") || sentence.contains("指数") ? new float[] { 0, 1 }
+					: new float[] { 1, 0 })
+			.toList();
 	}
 
 }

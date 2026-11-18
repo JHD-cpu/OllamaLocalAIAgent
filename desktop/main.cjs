@@ -1,9 +1,13 @@
 const { app, BrowserWindow, dialog, Menu } = require('electron')
 const path = require('path')
 const { ServiceManager, resolveBackendRoot, DEFAULT_PORT } = require('./service.cjs')
+const { EmbeddedBrowserManager } = require('./browser.cjs')
+const { KnowledgeGraphWindowManager } = require('./graph-window.cjs')
 
 let mainWindow = null
 let service = null
+let browsers = null
+let graphWindow = null
 let quitting = false
 
 /** 为窗口注册右键菜单（复制/粘贴） */
@@ -34,14 +38,32 @@ async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 840,
-    minWidth: 960,
-    minHeight: 640,
+    minWidth: 720,
+    minHeight: 520,
     show: false,
     title: 'OllamaChat',
+    backgroundColor: '#000000',
+    icon: path.join(__dirname, 'icon.png'),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      zoomFactor: 1
+    }
+  })
+
+  // 阻止 Ctrl+/- 缩放导致布局比例错乱；窗口尺寸变化只走 CSS 自适应。
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.webContents.setZoomFactor(1)
+  })
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') {
+      return
+    }
+    const key = String(input.key || '').toLowerCase()
+    if ((input.control || input.meta) && (key === '=' || key === '+' || key === '-' || key === '0' || key === 'numadd' || key === 'numsub')) {
+      event.preventDefault()
+      mainWindow.webContents.setZoomFactor(1)
     }
   })
 
@@ -49,9 +71,10 @@ async function createWindow() {
   attachContextMenu(mainWindow)
   await mainWindow.loadFile(path.join(__dirname, 'loading.html'))
 
-  // 窗口销毁后清空引用
+  // 主窗口关闭即退出应用（内嵌浏览器窗口不触发）
   mainWindow.on('closed', () => {
     mainWindow = null
+    app.quit()
   })
 }
 
@@ -110,9 +133,20 @@ async function boot() {
     }
   })
 
+  browsers = new EmbeddedBrowserManager({
+    port: DEFAULT_PORT,
+    iconPath: path.join(__dirname, 'icon.png')
+  })
+  graphWindow = new KnowledgeGraphWindowManager({
+    port: DEFAULT_PORT,
+    iconPath: path.join(__dirname, 'icon.png')
+  })
+
   try {
     setStatus('正在启动本地服务…')
     await service.start()
+    browsers.start()
+    graphWindow.start()
     setStatus('服务已就绪，正在打开页面…')
     openApp()
   }
@@ -130,12 +164,14 @@ app.whenReady().then(() => {
   return boot()
 })
 
-// 所有窗口关闭时退出应用
+// 主窗口关闭时退出；内嵌浏览器窗口关闭不退出应用
 app.on('window-all-closed', () => {
-  app.quit()
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    app.quit()
+  }
 })
 
-// 退出前先停止本地 Java 服务
+// 退出前先停浏览器轮询与本地 Java 服务
 app.on('before-quit', async (event) => {
   if (quitting) {
     return
@@ -143,6 +179,14 @@ app.on('before-quit', async (event) => {
   quitting = true
   event.preventDefault()
   try {
+    if (browsers) {
+      browsers.stop()
+      browsers.closeAll()
+    }
+    if (graphWindow) {
+      graphWindow.stop()
+      graphWindow.close()
+    }
     if (service) {
       await service.stop()
     }

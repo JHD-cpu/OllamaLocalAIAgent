@@ -20,6 +20,7 @@ public final class InstalledMode {
             Files.createDirectories(home.resolve("data"));
             Files.createDirectories(home.resolve("data").resolve("knowledge"));
             Files.createDirectories(home.resolve("data").resolve("workspace"));
+            Files.createDirectories(home.resolve("deps"));
             Files.createDirectories(home.resolve("logs"));
             seedSettings(home.resolve("data").resolve("settings.json"));
          } catch (IOException var3) {
@@ -27,12 +28,16 @@ public final class InstalledMode {
          }
 
          Path data = home.resolve("data").toAbsolutePath().normalize();
+         Path deps = home.resolve("deps").toAbsolutePath().normalize();
          String db = data.resolve("rag.db").toString().replace('\\', '/');
          System.setProperty("user.dir", home.toAbsolutePath().toString());
-         System.setProperty("logging.file.name", home.resolve("logs").resolve("app.log").toString());
+         String logFile = home.resolve("logs").resolve("app.log").toAbsolutePath().toString();
+         System.setProperty("logging.file.name", logFile);
+         System.setProperty("LOG_FILE", logFile);
          System.setProperty("spring.datasource.url", "jdbc:sqlite:" + db);
          System.setProperty("app.settings-file", data.resolve("settings.json").toString());
          System.setProperty("app.software-file", data.resolve("installed-software.json").toString());
+         System.setProperty("app.deps-dir", deps.toString());
          System.setProperty("app.rag.text-dir", data.resolve("knowledge").toString());
          System.setProperty("app.rag.vector-store-file", data.resolve("vectors.json").toString());
          System.setProperty("app.ollama.code-workspace", data.resolve("workspace").toString());

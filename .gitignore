@@ -2,9 +2,11 @@ frontend/node_modules/
 frontend/dist/
 backend/data/
 backend/target/
+backend/cp.txt
 desktop/node_modules/
 desktop/resources/
 dist/
+data/
 .tools/
 .idea/
 *.iml

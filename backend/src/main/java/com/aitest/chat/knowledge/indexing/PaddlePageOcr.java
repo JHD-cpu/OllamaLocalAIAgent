@@ -24,7 +24,7 @@ import org.springframework.stereotype.Component;
 
 /** 通过长驻 Python 进程调用 PaddleOCR 识别页面。 */
 @Component
-public class PaddlePageOcr implements PdfTextExtractor.PageOcr, DisposableBean {
+public class PaddlePageOcr implements PdfTextExtractor.PageOcr, DisposableBean, PaddleAvailability {
    private static final Logger log = LoggerFactory.getLogger(PaddlePageOcr.class);
    private final RagProperties properties;
    private final PythonExecutableLookup softwareCatalog;
@@ -99,6 +99,21 @@ public class PaddlePageOcr implements PdfTextExtractor.PageOcr, DisposableBean {
       }
 
       return var9;
+   }
+
+   /** 清除不可用缓存，安装依赖后可重新探测。 */
+   @Override
+   public void resetAvailability() {
+      synchronized (this.lock) {
+         this.stop();
+         this.unavailable.set(null);
+      }
+   }
+
+   /** 返回当前 OCR 环境探测结果（不抛异常）。 */
+   @Override
+   public String probeReason() {
+      return this.probe();
    }
 
    /** 探测环境；不可用时缓存原因并抛错。 */

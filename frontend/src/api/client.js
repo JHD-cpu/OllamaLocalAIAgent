@@ -8,14 +8,23 @@ export async function readError(response) {
   }
   try {
     const body = JSON.parse(text)
-    return body.message || text
+    if (body.message) {
+      return body.message
+    }
+    if (body.error && body.path) {
+      return `${body.error}（${body.path}）`
+    }
+    if (body.error) {
+      return String(body.error)
+    }
+    return text
   }
   catch {
     return text
   }
 }
 
-/** 发起 JSON API 请求，失败时抛出带 message 的 Error。 */
+/** 发起 JSON API 请求，失败时抛出带 message 的 Error；204/空体返回 null。 */
 export async function request(url, options) {
   const response = await fetch(url, {
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -24,5 +33,12 @@ export async function request(url, options) {
   if (!response.ok) {
     throw new Error(await readError(response))
   }
-  return response.json()
+  if (response.status === 204) {
+    return null
+  }
+  const text = await response.text()
+  if (!text) {
+    return null
+  }
+  return JSON.parse(text)
 }

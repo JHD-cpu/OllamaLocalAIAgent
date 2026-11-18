@@ -1,0 +1,28 @@
+---
+description: After product code changes, automatically rebuild the Windows installer
+alwaysApply: true
+---
+
+# Auto-package after changes
+
+When you finish a task that changes product code under `backend/`, `frontend/`, `desktop/`, or root packaging scripts (`package-windows.ps1`, `scripts/stage-backend.ps1`), **always** run packaging before ending the turn:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File F:\AITEST\package-windows.ps1
+```
+
+Use a long block timeout (at least 10 minutes). Report the installer path when done:
+
+- `F:\AITEST\dist\OllamaChat-Setup-1.0.0.exe`
+- also under `F:\AITEST\dist\desktop-build\`
+
+## Exceptions (do not package)
+
+- Pure docs / rules / chat-only replies with no product code edits
+- User explicitly says not to package
+- Packaging already succeeded in the same turn for the same changes
+
+## Notes
+
+- Do not ask whether to package; just run it after substantive product changes.
+- If packaging fails, fix the failure and retry once; then report the error.

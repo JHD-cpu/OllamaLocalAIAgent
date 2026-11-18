@@ -1,14 +1,17 @@
 <script setup>
-// 知识库页：上传文档、列表刷新、原文预览与分块编辑。
-import { onMounted, onUnmounted, ref } from 'vue'
+// 知识库：文档列表分页 + 分块编辑/原文预览；三维图在独立桌面弹窗。
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
+import { notifyError, notifySuccess } from '../../utils/notify.js'
 import {
   addChunk,
   deleteChunk,
   deleteDocument,
   listChunks,
   listDocuments,
+  openKnowledgeGraphWindow,
   originalUrl,
+  rechunkDocument,
   updateChunk,
   uploadDocument
 } from '../../api'
@@ -21,7 +24,11 @@ const error = ref('')
 const uploading = ref(false)
 const file = ref(null)
 const uploadRef = ref(null)
+const graphOpening = ref(false)
 let timer = null
+
+const page = ref(1)
+const pageSize = 8
 
 const originalOpen = ref(false)
 const originalName = ref('')
@@ -52,42 +59,105 @@ const statusType = {
   FAILED: 'danger'
 }
 
-// 进入页面拉取列表；处理中的文档每 2 秒轮询刷新。
+const pagedDocuments = computed(() => {
+  const start = (page.value - 1) * pageSize
+  return documents.value.slice(start, start + pageSize)
+})
+
 onMounted(async () => {
   await refresh()
   timer = setInterval(() => {
     if (documents.value.some((item) => item.status === 'PROCESSING')) {
       refresh()
     }
-  }, 2000)
+  }, 1000)
 })
 
-// 离开页面清除轮询定时器。
 onUnmounted(() => {
   clearInterval(timer)
 })
 
-/** 从后端重新加载文档列表。 */
+const notifiedFailures = new Set()
+
+watch(error, (value) => {
+  if (value) {
+    notifyError(value)
+  }
+})
+
+watch(
+  documents,
+  (list) => {
+    for (const doc of list || []) {
+      if (doc.status !== 'FAILED' || !doc.errorMessage) {
+        continue
+      }
+      const key = `${doc.id}:${doc.errorMessage}`
+      if (notifiedFailures.has(key)) {
+        continue
+      }
+      notifiedFailures.add(key)
+      notifyError(`「${doc.filename}」处理失败：${doc.errorMessage}`)
+    }
+  },
+  { deep: true }
+)
+
+watch(
+  () => documents.value.length,
+  (len) => {
+    const pages = Math.max(1, Math.ceil(len / pageSize))
+    if (page.value > pages) {
+      page.value = pages
+    }
+  }
+)
+
 async function refresh() {
   try {
     documents.value = await listDocuments()
+    error.value = ''
   }
   catch (reason) {
     error.value = reason.message
   }
 }
 
-/** 记录 el-upload 选中的原始 File 对象。 */
+function openGraphFallback() {
+  window.open('/?view=knowledge-graph', 'knowledge-graph', 'width=1120,height=760,menubar=no,toolbar=no')
+}
+
+async function onOpenGraph() {
+  if (graphOpening.value) {
+    return
+  }
+  graphOpening.value = true
+  try {
+    const result = await openKnowledgeGraphWindow()
+    if (!result?.desktop) {
+      openGraphFallback()
+    }
+    else {
+      notifySuccess('已请求打开三维知识点树窗口')
+    }
+  }
+  catch (reason) {
+    openGraphFallback()
+    notifyError(reason.message || '打开图谱窗口失败，已尝试浏览器弹窗')
+  }
+  finally {
+    graphOpening.value = false
+  }
+}
+
 function onFileChange(uploadFile) {
   file.value = uploadFile?.raw || null
 }
 
-/** 清空待上传文件引用。 */
 function onFileRemove() {
   file.value = null
 }
 
-/** 上传选中文件并刷新列表。 */
 async function onUpload() {
   if (!file.value || uploading.value) {
     return
@@ -108,7 +178,6 @@ async function onUpload() {
   }
 }
 
-/** 确认后删除文档及其向量数据。 */
 async function onDelete(row) {
   try {
     await ElMessageBox.confirm('原文、切块和向量会一起去掉。', `删除「${row.filename}」？`, {
@@ -130,7 +199,28 @@ async function onDelete(row) {
   }
 }
 
-/** 打开原文预览：PDF 用 iframe，文本类拉取正文。 */
+async function onRechunk(row) {
+  try {
+    await ElMessageBox.confirm('将按当前规则重新分块，旧切块与向量会被替换，原文件保留。', `重新分块「${row.filename}」？`, {
+      type: 'warning',
+      confirmButtonText: '重新分块',
+      cancelButtonText: '取消'
+    })
+  }
+  catch {
+    return
+  }
+  error.value = ''
+  try {
+    await rechunkDocument(row.id)
+    notifySuccess(`「${row.filename}」已开始重新分块`)
+    await refresh()
+  }
+  catch (reason) {
+    error.value = reason.message
+  }
+}
+
 async function onOriginal(row) {
   originalName.value = row.filename
   originalKind.value = row.mediaType
@@ -153,7 +243,6 @@ async function onOriginal(row) {
   }
 }
 
-/** 打开分块编辑弹窗并加载该文档切块。 */
 async function onChunks(row) {
   chunksDoc.value = row
   chunks.value = []
@@ -164,7 +253,6 @@ async function onChunks(row) {
   await loadChunks()
 }
 
-/** 拉取当前文档分块并为每条附加可编辑 draft。 */
 async function loadChunks() {
   if (!chunksDoc.value) {
     return
@@ -188,7 +276,6 @@ async function loadChunks() {
   }
 }
 
-/** 将单块 draft 保存到后端。 */
 async function onSaveChunk(chunk) {
   const text = chunk.draft.trim()
   if (!text || text === chunk.text || savingId.value) {
@@ -210,7 +297,6 @@ async function onSaveChunk(chunk) {
   }
 }
 
-/** 确认后删除单个分块。 */
 async function onDeleteChunk(chunk) {
   try {
     await ElMessageBox.confirm('这块正文和对应向量会一起去掉。', `删除第 ${chunk.index + 1} 块？`, {
@@ -232,7 +318,6 @@ async function onDeleteChunk(chunk) {
   }
 }
 
-/** 新增一段正文为分块并跳转到末页。 */
 async function onAddChunk() {
   const text = newChunk.value.trim()
   if (!text || savingId.value) {
@@ -259,7 +344,9 @@ async function onAddChunk() {
   <section class="pane">
     <div>
       <h2>知识库</h2>
-      <p class="field-hint">支持 txt、md 和 pdf。文字按语义切块后写入本地知识库。扫描版 PDF 需要本机已安装 Python 和 PaddleOCR（pip install paddleocr）；没有安装时，上传扫描件会提示你先安装。</p>
+      <p class="field-hint">
+        支持 txt、md、pdf、docx、xlsx，上传不限大小。入库先粗分片再按「主题→子主题→概念」细切；扫描 PDF 用本地 Ollama 视觉模型（无则默认模型）。多文档可并行分块。
+      </p>
     </div>
 
     <div class="knowledge-bar">
@@ -268,25 +355,47 @@ async function onAddChunk() {
         class="knowledge-upload"
         :auto-upload="false"
         :limit="1"
-        accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+        accept=".pdf,.txt,.md,.docx,.xlsx,.xls,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         :on-change="onFileChange"
         :on-remove="onFileRemove"
       >
-        <el-button>选择文件</el-button>
+        <el-button size="small">选择文件</el-button>
       </el-upload>
-      <el-button type="primary" :disabled="!file" :loading="uploading" @click="onUpload">上传</el-button>
+      <el-button size="small" type="primary" :disabled="!file" :loading="uploading" @click="onUpload">上传</el-button>
+      <el-button size="small" text @click="refresh">刷新</el-button>
     </div>
 
     <el-alert v-if="error" type="error" :title="error" show-icon :closable="false" />
 
-    <DocumentTable
-      :documents="documents"
-      :status-text="statusText"
-      :status-type="statusType"
-      @original="onOriginal"
-      @chunks="onChunks"
-      @delete="onDelete"
-    />
+    <div class="knowledge-list-block">
+      <div class="knowledge-list-head">
+        <h3>文档列表</h3>
+        <div class="knowledge-list-actions">
+          <el-button size="small" type="primary" plain :loading="graphOpening" @click="onOpenGraph">
+            三维知识点树
+          </el-button>
+          <el-pagination
+            v-if="documents.length > pageSize"
+            :current-page="page"
+            :page-size="pageSize"
+            :total="documents.length"
+            layout="prev, pager, next, total"
+            background
+            size="small"
+            @current-change="page = $event"
+          />
+        </div>
+      </div>
+      <DocumentTable
+        :documents="pagedDocuments"
+        :status-text="statusText"
+        :status-type="statusType"
+        @original="onOriginal"
+        @chunks="onChunks"
+        @rechunk="onRechunk"
+        @delete="onDelete"
+      />
+    </div>
 
     <OriginalPreviewDialog
       v-model="originalOpen"

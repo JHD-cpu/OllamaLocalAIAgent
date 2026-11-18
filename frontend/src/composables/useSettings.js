@@ -1,6 +1,6 @@
-// 设置表单状态、脏检查、加载保存与 Ollama 探测。
+// 设置表单状态、脏检查、加载保存与 LLM 探测。
 import { computed, reactive, ref } from 'vue'
-import { getDefaults, getSettings, probeOllama, saveSettings } from '../api'
+import { getDefaults, getSettings, listLlmProviders, probeLlm, saveSettings } from '../api'
 import { applyWebPrompt } from '../constants/webPrompt.js'
 
 /** 封装配置面板的表单数据与持久化流程。 */
@@ -11,30 +11,32 @@ export function useSettings() {
   const loaded = ref(false)
   const loadError = ref('')
   const models = ref([])
+  const providers = ref([])
   const settingsError = ref('')
   const probeMessage = ref('')
   const settingsOpen = ref(false)
   const saving = ref(false)
   const probing = ref(false)
 
-  // 当前表单与上次保存快照不一致即为未保存。
   const dirty = computed(() => JSON.stringify(form) !== JSON.stringify(saved.value))
 
-  /** 用服务端返回的配置覆盖表单与 saved 快照。 */
   function applySettings(value) {
     Object.assign(form, value)
     saved.value = { ...value }
   }
 
-  /** 并行加载当前设置与默认值。 */
   async function load() {
-    const [current, base] = await Promise.all([getSettings(), getDefaults()])
+    const [current, base, providerList] = await Promise.all([
+      getSettings(),
+      getDefaults(),
+      listLlmProviders().catch(() => [])
+    ])
     applySettings(current)
     defaults.value = base
+    providers.value = Array.isArray(providerList) ? providerList : []
     loaded.value = true
   }
 
-  /** 提交表单并更新本地快照。 */
   async function save() {
     saving.value = true
     settingsError.value = ''
@@ -53,16 +55,22 @@ export function useSettings() {
     }
   }
 
-  /** 用当前 baseUrl 测试 Ollama 并刷新模型列表。 */
   async function probe() {
     probing.value = true
     settingsError.value = ''
     probeMessage.value = ''
     try {
-      const result = await probeOllama(form.baseUrl)
-      models.value = result.models || []
+      const result = await probeLlm({
+        llmProvider: form.llmProvider,
+        apiKey: form.apiKey,
+        baseUrl: form.baseUrl,
+        model: form.model
+      })
+      models.value = (result.models || []).map((m) =>
+        typeof m === 'string' ? { name: m } : { name: m.name || m.id || '', ...m }
+      )
       if (result.ok) {
-        probeMessage.value = `连接成功，Ollama ${result.version}，共 ${models.value.length} 个模型`
+        probeMessage.value = `连接成功（${result.providerLabel || result.provider}）`
       }
       else {
         settingsError.value = result.message
@@ -78,16 +86,32 @@ export function useSettings() {
     }
   }
 
-  /** 将表单填回默认值（需保存后生效）。 */
   function reset() {
     Object.assign(form, defaults.value)
     settingsError.value = ''
     probeMessage.value = ''
   }
 
-  /** 根据联网开关调整系统提示词中的固定片段。 */
   function syncWebPrompt(enabled) {
     form.systemPrompt = applyWebPrompt(form.systemPrompt, enabled)
+  }
+
+  /** 切换提供方时填入默认地址/模型（保留已填 API Key）。 */
+  function applyProviderPreset(providerId) {
+    const provider = providers.value.find((p) => p.id === providerId)
+    form.llmProvider = providerId
+    if (!provider) {
+      return
+    }
+    if (provider.defaultBaseUrl) {
+      form.baseUrl = provider.defaultBaseUrl
+    }
+    if (provider.defaultModel) {
+      form.model = provider.defaultModel
+    }
+    if (!provider.requiresApiKey) {
+      form.apiKey = form.apiKey || ''
+    }
   }
 
   return {
@@ -97,6 +121,7 @@ export function useSettings() {
     loaded,
     loadError,
     models,
+    providers,
     settingsError,
     probeMessage,
     settingsOpen,
@@ -108,6 +133,7 @@ export function useSettings() {
     save,
     probe,
     reset,
-    syncWebPrompt
+    syncWebPrompt,
+    applyProviderPreset
   }
 }

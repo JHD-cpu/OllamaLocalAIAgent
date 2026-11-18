@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -14,6 +15,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.stereotype.Component;
+
+import com.aitest.chat.desktop.deps.ManagedDepsLayout;
+
 import tools.jackson.databind.json.JsonMapper;
 
 /** 启动时扫描本机软件，持久化并供提示词与 Python 路径查询。 */
@@ -23,13 +27,16 @@ public class InstalledSoftwareCatalog implements PythonExecutableLookup, Applica
    private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
    private final JsonMapper jsonMapper;
    private final Path softwareFile;
+   private final ManagedDepsLayout managedDeps;
    private final Object lock = new Object();
    private InstalledSoftwareSnapshot snapshot = InstalledSoftwareSnapshot.empty("");
 
    /** 解析配置文件路径并准备 JSON 读写。 */
-   public InstalledSoftwareCatalog(JsonMapper jsonMapper, @Value("${app.software-file:data/installed-software.json}") String softwareFile) {
+   public InstalledSoftwareCatalog(JsonMapper jsonMapper, @Value("${app.software-file:data/installed-software.json}") String softwareFile,
+         ManagedDepsLayout managedDeps) {
       this.jsonMapper = jsonMapper;
       this.softwareFile = resolve(softwareFile);
+      this.managedDeps = managedDeps;
    }
 
    /** 应用就绪后触发首次扫描。 */
@@ -42,7 +49,7 @@ public class InstalledSoftwareCatalog implements PythonExecutableLookup, Applica
       synchronized (this.lock) {
          try {
             List<InstalledSoftwareItem> items = InstalledSoftwareScanner.scan();
-            Map<String, String> resolved = InstalledSoftwareScanner.resolve(items);
+            Map<String, String> resolved = preferManaged(InstalledSoftwareScanner.resolve(items));
             InstalledSoftwareSnapshot fresh = new InstalledSoftwareSnapshot(LocalDateTime.now().format(TIME), items, resolved);
             this.persist(fresh);
             this.snapshot = fresh;
@@ -75,24 +82,117 @@ public class InstalledSoftwareCatalog implements PythonExecutableLookup, Applica
       }
    }
 
-   /** {@inheritDoc} */
+   /** {@inheritDoc} 优先使用应用 deps 目录中的 Python。 */
    public String pythonExe() {
-      return this.resolved("python");
+      return firstNonBlank(this.managedDeps.pythonExe(), this.resolved("python"));
    }
 
-   /** 已解析的 Chrome 可执行文件路径。 */
+   /** 已解析的 Chrome（系统安装，仅作参考；打开网页用默认浏览器）。 */
    public String chromeExe() {
       return this.resolved("chrome");
    }
 
-   /** 已解析的 Node.js 可执行文件路径。 */
+   /** 已解析的 Node.js；优先应用 deps 目录。 */
    public String nodeExe() {
-      return this.resolved("node");
+      return firstNonBlank(this.managedDeps.nodeExe(), this.resolved("node"));
    }
 
-   /** 已解析的 Ollama 可执行文件路径。 */
+   /** 已解析的 Ollama；优先应用 deps 目录。 */
    public String ollamaExe() {
-      return this.resolved("ollama");
+      return firstNonBlank(this.managedDeps.ollamaExe(), this.resolved("ollama"));
+   }
+
+   /** 把应用自管 deps 路径覆盖进 resolved 映射。 */
+   private Map<String, String> preferManaged(Map<String, String> scanned) {
+      LinkedHashMap<String, String> merged = new LinkedHashMap<>(scanned == null ? Map.of() : scanned);
+      putIfPresent(merged, "python", this.managedDeps.pythonExe());
+      putIfPresent(merged, "node", this.managedDeps.nodeExe());
+      putIfPresent(merged, "ollama", this.managedDeps.ollamaExe());
+      return Map.copyOf(merged);
+   }
+
+   private static void putIfPresent(Map<String, String> map, String key, String value) {
+      if (value != null && !value.isBlank()) {
+         map.put(key, value);
+      }
+   }
+
+   private static String firstNonBlank(String first, String second) {
+      if (first != null && !first.isBlank()) {
+         return first;
+      }
+      return second != null && !second.isBlank() ? second : null;
+   }
+
+   /**
+    * 按名称模糊匹配已装软件，返回可启动路径（exe 优先，其次安装目录下常见 exe）。
+    * 找不到时返回 null，并由调用方用 {@link #suggestNames(String)} 提示候选。
+    */
+   public String findLaunchPath(String query) {
+      String needle = query == null ? "" : query.trim().toLowerCase();
+      if (needle.isEmpty()) {
+         return null;
+      }
+      // 常见别名
+      if ("notepad".equals(needle) || "记事本".equals(needle)) {
+         return "notepad.exe";
+      }
+      if ("explorer".equals(needle) || "资源管理器".equals(needle)) {
+         return "explorer.exe";
+      }
+      if ("cmd".equals(needle) || "命令提示符".equals(needle)) {
+         return "cmd.exe";
+      }
+      if ("powershell".equals(needle)) {
+         return "powershell.exe";
+      }
+      InstalledSoftwareSnapshot current = this.snapshot();
+      Map<String, String> resolved = current.resolved() == null ? Map.of() : current.resolved();
+      for (Map.Entry<String, String> entry : resolved.entrySet()) {
+         if (entry.getKey() != null && entry.getKey().toLowerCase().contains(needle) && !blank(entry.getValue())) {
+            return entry.getValue();
+         }
+      }
+      List<InstalledSoftwareItem> items = current.items() == null ? List.of() : current.items();
+      InstalledSoftwareItem best = null;
+      for (InstalledSoftwareItem item : items) {
+         String name = item.name() == null ? "" : item.name().toLowerCase();
+         if (!name.contains(needle)) {
+            continue;
+         }
+         if (best == null || name.length() < best.name().length()) {
+            best = item;
+         }
+      }
+      if (best == null) {
+         return null;
+      }
+      if (!blank(best.exePath())) {
+         return best.exePath();
+      }
+      if (!blank(best.installLocation())) {
+         return best.installLocation();
+      }
+      return null;
+   }
+
+   /** 返回名称包含关键词的候选软件名（最多 8 个）。 */
+   public List<String> suggestNames(String query) {
+      String needle = query == null ? "" : query.trim().toLowerCase();
+      List<String> names = new ArrayList<>();
+      if (needle.isEmpty()) {
+         return names;
+      }
+      for (InstalledSoftwareItem item : this.snapshot().items() == null ? List.<InstalledSoftwareItem>of() : this.snapshot().items()) {
+         String name = item.name() == null ? "" : item.name();
+         if (name.toLowerCase().contains(needle)) {
+            names.add(name);
+            if (names.size() >= 8) {
+               break;
+            }
+         }
+      }
+      return names;
    }
 
    /** 生成注入系统提示词的本机软件摘要（控制条目数量）。 */

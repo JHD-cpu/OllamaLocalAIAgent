@@ -3,21 +3,32 @@ package com.aitest.chat.conversation;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
 
+import com.aitest.chat.desktop.EmbeddedBrowserQueue;
+import com.aitest.chat.desktop.InstalledSoftwareCatalog;
+import com.aitest.chat.desktop.deps.ManagedDepsLayout;
 import com.aitest.chat.knowledge.application.KnowledgeService;
+import com.aitest.chat.llm.ChatOptionsFactory;
+import com.aitest.chat.mcp.McpToolBridge;
+import com.aitest.chat.memory.MemoryService;
 import com.aitest.chat.settings.AppSettings;
 import com.aitest.chat.tools.code.CodeTools;
+import com.aitest.chat.tools.desktop.BrowserReadTool;
+import com.aitest.chat.tools.desktop.OpenAppTool;
+import com.aitest.chat.tools.desktop.OpenBrowserTool;
+import com.aitest.chat.tools.desktop.ScreenshotTool;
 import com.aitest.chat.tools.knowledge.KnowledgeSearchTool;
+import com.aitest.chat.tools.memory.MemoryTools;
 import com.aitest.chat.tools.time.CurrentTimeTool;
 import com.aitest.chat.tools.web.SearchQueryRewriter;
 import com.aitest.chat.tools.web.SearchedPages;
 import com.aitest.chat.tools.web.WebAccessTools;
 
-/** 按开关组装本轮可用的工具回调与 Ollama 采样选项。 */
+/** 按开关组装本轮可用的工具回调与聊天采样选项。 */
 @Component
 public class ChatToolCallbacks {
 
@@ -25,13 +36,31 @@ public class ChatToolCallbacks {
 
 	private final SearchQueryRewriter queryRewriter;
 
-	/** 注入知识检索与搜索查询改写依赖。 */
-	public ChatToolCallbacks(KnowledgeService knowledgeService, SearchQueryRewriter queryRewriter) {
+	private final EmbeddedBrowserQueue browserQueue;
+
+	private final InstalledSoftwareCatalog softwareCatalog;
+
+	private final ManagedDepsLayout depsLayout;
+
+	private final MemoryService memoryService;
+
+	private final McpToolBridge mcpToolBridge;
+
+	private final ChatOptionsFactory optionsFactory;
+
+	public ChatToolCallbacks(KnowledgeService knowledgeService, SearchQueryRewriter queryRewriter,
+			EmbeddedBrowserQueue browserQueue, InstalledSoftwareCatalog softwareCatalog, ManagedDepsLayout depsLayout,
+			MemoryService memoryService, McpToolBridge mcpToolBridge, ChatOptionsFactory optionsFactory) {
 		this.knowledgeService = knowledgeService;
 		this.queryRewriter = queryRewriter;
+		this.browserQueue = browserQueue;
+		this.softwareCatalog = softwareCatalog;
+		this.depsLayout = depsLayout;
+		this.memoryService = memoryService;
+		this.mcpToolBridge = mcpToolBridge;
+		this.optionsFactory = optionsFactory;
 	}
 
-	/** 按联网与代码开关取较大的工具轮次上限。 */
 	public int toolRoundLimit(AppSettings settings) {
 		if (!settings.codeEnabled()) {
 			return settings.webMaxRounds();
@@ -39,32 +68,20 @@ public class ChatToolCallbacks {
 		return Math.max(settings.webMaxRounds(), settings.codeMaxRounds());
 	}
 
-	/** 组装 Ollama 采样参数，并按需挂上工具回调。 */
-	public OllamaChatOptions toOptions(AppSettings settings, boolean toolsAllowed, SearchedPages pages) {
-		OllamaChatOptions.Builder builder = OllamaChatOptions.builder()
-			.model(settings.model())
-			.temperature(settings.temperature())
-			.topP(settings.topP())
-			.topK(settings.topK())
-			.numCtx(settings.numCtx())
-			.numPredict(settings.numPredict())
-			.repeatPenalty(settings.repeatPenalty());
-		if (settings.think()) {
-			builder.enableThinking();
-		}
-		else {
-			builder.disableThinking();
-		}
-		if (toolsAllowed) {
-			builder.toolCallbacks(toolCallbacks(settings, pages));
-		}
-		return builder.build();
+	public ChatOptions toOptions(AppSettings settings, boolean toolsAllowed, SearchedPages pages) {
+		ToolCallback[] callbacks = toolsAllowed ? toolCallbacks(settings, pages) : new ToolCallback[0];
+		return this.optionsFactory.create(settings, toolsAllowed, callbacks);
 	}
 
-	/** 根据功能开关收集本轮可调用的 Spring AI 工具。 */
 	public ToolCallback[] toolCallbacks(AppSettings settings, SearchedPages pages) {
 		List<ToolCallback> callbacks = new ArrayList<>();
 		callbacks.addAll(List.of(ToolCallbacks.from(new CurrentTimeTool())));
+		callbacks.addAll(List.of(ToolCallbacks.from(new OpenBrowserTool(this.browserQueue))));
+		callbacks.addAll(List.of(ToolCallbacks.from(new BrowserReadTool(this.browserQueue))));
+		callbacks.addAll(List.of(ToolCallbacks.from(new OpenAppTool(this.softwareCatalog))));
+		callbacks.addAll(List.of(ToolCallbacks.from(new ScreenshotTool(this.depsLayout))));
+		callbacks.addAll(List.of(ToolCallbacks.from(new MemoryTools(this.memoryService))));
+		callbacks.addAll(this.mcpToolBridge.callbacks());
 		if (settings.ragEnabled()) {
 			callbacks.addAll(List.of(ToolCallbacks.from(new KnowledgeSearchTool(this.knowledgeService, settings.ragTopK()))));
 		}

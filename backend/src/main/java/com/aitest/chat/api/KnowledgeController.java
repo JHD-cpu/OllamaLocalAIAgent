@@ -52,7 +52,7 @@ public class KnowledgeController {
    )
    public Mono<KnowledgeDocumentView> upload(@RequestPart("file") FilePart file) {
       return DataBufferUtils.join(file.content())
-         .timeout(Duration.ofMinutes(2L))
+         .timeout(Duration.ofMinutes(30L))
          .switchIfEmpty(Mono.error(new IllegalArgumentException("请选择文件")))
          .publishOn(Schedulers.boundedElastic())
          .map(buffer -> {
@@ -72,6 +72,12 @@ public class KnowledgeController {
    @ResponseStatus(HttpStatus.NO_CONTENT)
    public void delete(@PathVariable String id) {
       this.knowledgeService.delete(id);
+   }
+
+   /** 保留原件，按当前规则重新分块入库。 */
+   @PostMapping({"/documents/{id}/rechunk"})
+   public Mono<KnowledgeDocumentView> rechunk(@PathVariable String id) {
+      return Mono.fromCallable(() -> this.knowledgeService.rechunk(id)).subscribeOn(Schedulers.boundedElastic());
    }
 
    /** 返回原始上传文件字节流（inline 展示）。 */

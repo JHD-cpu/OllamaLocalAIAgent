@@ -31,14 +31,44 @@ public class KnowledgeRepository {
    public void insertDocument(KnowledgeRepository.StoredDocument document) {
       this.jdbc
          .sql(
-            "INSERT INTO rag_document\n\t(id, filename, media_type, status, original_path, created_at)\nVALUES\n\t(:id, :filename, :mediaType, :status, :originalPath, :createdAt)\n"
+            "INSERT INTO rag_document\n\t(id, filename, media_type, status, chunk_count, progress, progress_message, original_path, created_at)\nVALUES\n\t(:id, :filename, :mediaType, :status, :chunkCount, :progress, :progressMessage, :originalPath, :createdAt)\n"
          )
          .param("id", document.id())
          .param("filename", document.filename())
          .param("mediaType", document.mediaType())
          .param("status", document.status())
+         .param("chunkCount", document.chunkCount() == null ? 0 : document.chunkCount())
+         .param("progress", document.progress() == null ? 0 : document.progress())
+         .param("progressMessage", document.progressMessage() == null ? "排队中" : document.progressMessage())
          .param("originalPath", document.originalPath())
          .param("createdAt", document.createdAt().format(CREATED_AT))
+         .update();
+   }
+
+   /** 更新处理进度（百分比、阶段说明、已有分块数）。 */
+   public void updateProgress(String id, int percent, String message, Integer chunkCount) {
+      int pct = Math.clamp(percent, 0, 100);
+      String msg = message == null || message.isBlank() ? null : message.trim();
+      if (msg != null && msg.length() > 200) {
+         msg = msg.substring(0, 200);
+      }
+      if (chunkCount == null) {
+         this.jdbc
+            .sql("UPDATE rag_document SET progress = :progress, progress_message = :message WHERE id = :id AND status = 'PROCESSING'")
+            .param("progress", pct)
+            .param("message", msg)
+            .param("id", id)
+            .update();
+         return;
+      }
+      this.jdbc
+         .sql(
+            "UPDATE rag_document SET progress = :progress, progress_message = :message, chunk_count = :chunkCount WHERE id = :id AND status = 'PROCESSING'"
+         )
+         .param("progress", pct)
+         .param("message", msg)
+         .param("chunkCount", Math.max(0, chunkCount))
+         .param("id", id)
          .update();
    }
 
@@ -58,7 +88,7 @@ public class KnowledgeRepository {
    public void markReady(String id, int charCount, int chunkCount, String textPath) {
       this.jdbc
          .sql(
-            "UPDATE rag_document\nSET status = 'READY', error_message = NULL, char_count = :charCount,\n\tchunk_count = :chunkCount, text_path = :textPath\nWHERE id = :id\n"
+            "UPDATE rag_document\nSET status = 'READY', error_message = NULL, char_count = :charCount,\n\tchunk_count = :chunkCount, progress = 100, progress_message = '完成',\n\ttext_path = :textPath\nWHERE id = :id\n"
          )
          .param("charCount", charCount)
          .param("chunkCount", chunkCount)
@@ -69,14 +99,33 @@ public class KnowledgeRepository {
 
    /** 标记文档处理失败及错误摘要。 */
    public void markFailed(String id, String error) {
-      this.jdbc.sql("UPDATE rag_document SET status = 'FAILED', error_message = :error WHERE id = :id").param("error", error).param("id", id).update();
+      this.jdbc
+         .sql("UPDATE rag_document SET status = 'FAILED', error_message = :error, progress_message = :error WHERE id = :id")
+         .param("error", error)
+         .param("id", id)
+         .update();
+   }
+
+   /** 重新分块：置为处理中并清空错误与旧进度。 */
+   public void markProcessing(String id) {
+      this.jdbc
+         .sql(
+            "UPDATE rag_document\nSET status = 'PROCESSING', error_message = NULL, char_count = NULL,\n\tchunk_count = 0, progress = 0, progress_message = '重新分块排队中', text_path = NULL\nWHERE id = :id\n"
+         )
+         .param("id", id)
+         .update();
+   }
+
+   /** 删除文档下全部分块行（保留文档元数据）。 */
+   public void deleteChunksByDocument(String documentId) {
+      this.jdbc.sql("DELETE FROM rag_chunk WHERE document_id = :id").param("id", documentId).update();
    }
 
    /** 按创建时间倒序列出全部文档。 */
    public List<KnowledgeRepository.StoredDocument> list() {
       return this.jdbc
          .sql(
-            "SELECT id, filename, media_type, status, error_message, char_count, chunk_count,\n\toriginal_path, text_path, created_at\nFROM rag_document\nORDER BY created_at DESC\n"
+            "SELECT id, filename, media_type, status, error_message, char_count, chunk_count,\n\tprogress, progress_message, original_path, text_path, created_at\nFROM rag_document\nORDER BY created_at DESC\n"
          )
          .query((rs, row) -> map(rs))
          .list();
@@ -86,7 +135,7 @@ public class KnowledgeRepository {
    public Optional<KnowledgeRepository.StoredDocument> find(String id) {
       return this.jdbc
          .sql(
-            "SELECT id, filename, media_type, status, error_message, char_count, chunk_count,\n\toriginal_path, text_path, created_at\nFROM rag_document\nWHERE id = :id\n"
+            "SELECT id, filename, media_type, status, error_message, char_count, chunk_count,\n\tprogress, progress_message, original_path, text_path, created_at\nFROM rag_document\nWHERE id = :id\n"
          )
          .param("id", id)
          .query((rs, row) -> map(rs))
@@ -165,8 +214,10 @@ public class KnowledgeRepository {
          rs.getString("media_type"),
          rs.getString("status"),
          rs.getString("error_message"),
-         (Integer)rs.getObject("char_count"),
-         (Integer)rs.getObject("chunk_count"),
+         (Integer) rs.getObject("char_count"),
+         (Integer) rs.getObject("chunk_count"),
+         (Integer) rs.getObject("progress"),
+         rs.getString("progress_message"),
          rs.getString("original_path"),
          rs.getString("text_path"),
          readCreatedAt(rs.getString("created_at"))
@@ -212,6 +263,8 @@ public class KnowledgeRepository {
       String errorMessage,
       Integer charCount,
       Integer chunkCount,
+      Integer progress,
+      String progressMessage,
       String originalPath,
       String textPath,
       LocalDateTime createdAt
