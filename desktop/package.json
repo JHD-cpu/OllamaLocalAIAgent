@@ -1,0 +1,56 @@
+{
+  "name": "ollama-chat-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OllamaChat desktop shell",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "^39.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.aitest.ollamachat",
+    "productName": "OllamaChat",
+    "directories": {
+      "output": "../dist/desktop-build"
+    },
+    "files": [
+      "main.cjs",
+      "service.cjs",
+      "loading.html"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/backend",
+        "to": "backend"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "OllamaChat-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "OllamaChat",
+      "include": "installer.nsh"
+    }
+  },
+  "allowScripts": {
+    "electron@39.8.10": true,
+    "electron-winstaller@5.4.0": true
+  }
+}

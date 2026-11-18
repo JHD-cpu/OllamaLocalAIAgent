@@ -1,0 +1,303 @@
+/* 只补 Element Plus 没有的整页高度和对话气泡。控件样式交给组件库。 */
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+.shell {
+  height: 100%;
+  background: var(--el-bg-color-page);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid var(--el-border-color-light);
+  background: var(--el-bg-color);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.top-side {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-name {
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.transcript {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.bubble {
+  max-width: min(760px, 88%);
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--el-fill-color-light);
+}
+
+.bubble.user {
+  margin-left: auto;
+  background: var(--el-color-primary-light-9);
+}
+
+.bubble .role {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.bubble .text,
+.thinking pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+}
+
+.thinking {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--el-bg-color);
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.thinking span {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.thinking pre {
+  max-height: 160px;
+  overflow: auto;
+}
+
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.sources {
+  margin-bottom: 8px;
+}
+
+.sources-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.sources-toggle .el-icon {
+  transition: transform 0.2s;
+}
+
+.sources-toggle .el-icon.open {
+  transform: rotate(180deg);
+}
+
+.sources ul {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.sources li + li {
+  margin-top: 4px;
+}
+
+.sources a {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  text-decoration: none;
+  background: var(--el-bg-color);
+}
+
+.sources a:hover {
+  background: var(--el-color-primary-light-9);
+}
+
+.source-title {
+  color: var(--el-color-primary);
+  line-height: 1.4;
+}
+
+.source-url {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.composer-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.knowledge-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.knowledge-upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.knowledge-upload .el-upload-list {
+  margin: 0;
+}
+
+.knowledge-upload .el-upload-list__item {
+  margin: 0;
+}
+
+.original-frame {
+  width: 100%;
+  height: 70vh;
+  border: 0;
+  background: var(--el-bg-color);
+}
+
+.original-text,
+.chunk-card textarea {
+  white-space: pre-wrap;
+}
+
+.original-text {
+  max-height: 70vh;
+  margin: 0;
+  overflow: auto;
+  line-height: 1.6;
+}
+
+.chunk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 62vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.chunk-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+}
+
+.chunk-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.chunk-list .el-pagination {
+  justify-content: center;
+}
+
+.settings-form {
+  max-height: 62vh;
+  overflow: auto;
+  padding-right: 8px;
+}
+
+.settings-form .el-select,
+.settings-form .el-input-number {
+  width: 100%;
+}
+
+.field-hint {
+  margin: 0 0 8px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.model-meta {
+  margin: -6px 0 12px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .model-name {
+    display: none;
+  }
+
+  .top {
+    gap: 8px;
+  }
+}

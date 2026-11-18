@@ -3,14 +3,18 @@ package com.aitest.chat.settings;
 import java.net.URI;
 
 /**
- * 一份完整的应用配置：Ollama 地址和采样参数、联网搜索，以及知识库检索。
+ * 一份完整的应用配置：Ollama 地址和采样参数、联网搜索、知识库检索，以及代码工具。
  * 字段都经过 {@link #normalize(AppSettings)} 校验后才会保存或使用。
  * numPredict 为 -1 表示不限制生成长度，-2 表示尽量把上下文填满。
  */
 public record AppSettings(String baseUrl, String model, String systemPrompt, double temperature, double topP, int topK,
 		int numCtx, int numPredict, double repeatPenalty, boolean think, boolean webEnabled, String webProvider,
 		String webSearchUrl, int webMaxResults, boolean webFetch, int webMaxRounds, boolean ragEnabled,
-		String embeddingModel, int ragTopK) {
+		String embeddingModel, int ragTopK, boolean codeEnabled, String codeWorkspace, int codeTimeoutSeconds,
+		int codeMaxRounds) {
+
+	/** 打开联网时追加到系统提示词末尾的固定说明。 */
+	public static final String WEB_PROMPT = "对于实时信息联网查询相关信息，不确定时列出所有可能的信息；";
 
 	/**
 	 * 校验并整理一份配置。空白会被裁掉，尾部斜杠会被去掉。
@@ -25,7 +29,7 @@ public record AppSettings(String baseUrl, String model, String systemPrompt, dou
 		if (model.isEmpty() || model.length() > 128 || containsWhitespace(model)) {
 			throw new IllegalArgumentException("模型名称不正确");
 		}
-		String systemPrompt = raw.systemPrompt() == null ? "" : raw.systemPrompt().trim();
+		String systemPrompt = applyWebPrompt(raw.systemPrompt(), raw.webEnabled());
 		if (systemPrompt.length() > 4000) {
 			throw new IllegalArgumentException("系统提示词不能超过 4000 个字符");
 		}
@@ -56,38 +60,52 @@ public record AppSettings(String baseUrl, String model, String systemPrompt, dou
 		while (webSearchUrl.endsWith("/")) {
 			webSearchUrl = webSearchUrl.substring(0, webSearchUrl.length() - 1);
 		}
-		/*
-		 * SearXNG 地址必须是合法的 http(s) 基址。
-		 * 用必应时这个地址可以留空；如果填了，也必须带协议，避免以后切换来源时才发现写错。
-		 */
 		if ("searxng".equals(webProvider)) {
 			webSearchUrl = normalizeBaseUrl(webSearchUrl);
 		}
 		else if (!webSearchUrl.isEmpty() && !webSearchUrl.startsWith("http://") && !webSearchUrl.startsWith("https://")) {
 			throw new IllegalArgumentException("SearXNG 地址需要以 http:// 或 https:// 开头");
 		}
-		if (raw.webMaxResults() < 1 || raw.webMaxResults() > 8) {
-			throw new IllegalArgumentException("搜索结果条数需要在 1 到 8 之间");
+		if (raw.webMaxResults() < 1) {
+			throw new IllegalArgumentException("搜索结果条数至少为 1");
 		}
-		if (raw.webMaxRounds() < 1 || raw.webMaxRounds() > 4) {
-			throw new IllegalArgumentException("最多检索次数需要在 1 到 4 之间");
+		if (raw.webMaxRounds() < 1) {
+			throw new IllegalArgumentException("检索次数至少为 1");
 		}
 		String embeddingModel = raw.embeddingModel() == null ? "" : raw.embeddingModel().trim();
 		if (embeddingModel.isEmpty() || embeddingModel.length() > 128 || containsWhitespace(embeddingModel)) {
 			throw new IllegalArgumentException("嵌入模型名称不正确");
 		}
-		if (raw.ragTopK() < 1 || raw.ragTopK() > 8) {
-			throw new IllegalArgumentException("知识库检索条数需要在 1 到 8 之间");
+		if (raw.ragTopK() < 1) {
+			throw new IllegalArgumentException("知识库检索条数至少为 1");
+		}
+		String codeWorkspace = raw.codeWorkspace() == null ? "" : raw.codeWorkspace().trim();
+		if (codeWorkspace.isEmpty() || codeWorkspace.length() > 260) {
+			throw new IllegalArgumentException("代码工作区路径不正确");
+		}
+		if (raw.codeTimeoutSeconds() < 1 || raw.codeTimeoutSeconds() > 120) {
+			throw new IllegalArgumentException("命令超时需要在 1 到 120 秒之间");
+		}
+		if (raw.codeMaxRounds() < 1) {
+			throw new IllegalArgumentException("代码生成轮次至少为 1");
 		}
 		return new AppSettings(baseUrl, model, systemPrompt, raw.temperature(), raw.topP(), raw.topK(), raw.numCtx(),
 				raw.numPredict(), raw.repeatPenalty(), raw.think(), raw.webEnabled(), webProvider, webSearchUrl,
 				raw.webMaxResults(), raw.webFetch(), raw.webMaxRounds(), raw.ragEnabled(), embeddingModel,
-				raw.ragTopK());
+				raw.ragTopK(), raw.codeEnabled(), codeWorkspace, raw.codeTimeoutSeconds(), raw.codeMaxRounds());
+	}
+
+	/** 按联网开关增删固定的联网说明句，避免重复叠加。 */
+	static String applyWebPrompt(String prompt, boolean webEnabled) {
+		String text = prompt == null ? "" : prompt.replace(WEB_PROMPT, "").trim();
+		if (!webEnabled) {
+			return text;
+		}
+		return text.isEmpty() ? WEB_PROMPT : text + WEB_PROMPT;
 	}
 
 	/**
 	 * 整理 Ollama 或 SearXNG 的基址：去掉尾部斜杠，要求 http(s)，并且必须有主机和端口。
-	 * 端口为 0 说明地址里没写端口，这里不接受默认端口省略写法。
 	 */
 	public static String normalizeBaseUrl(String value) {
 		String baseUrl = value == null ? "" : value.trim();

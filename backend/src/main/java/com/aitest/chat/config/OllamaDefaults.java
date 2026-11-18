@@ -50,11 +50,19 @@ public class OllamaDefaults {
 
 	private int ragTopK;
 
+	private boolean codeEnabled;
+
+	private String codeWorkspace;
+
+	private int codeTimeoutSeconds;
+
+	private int codeMaxRounds;
+
 	/** 组装成一份尚未校验的配置，调用方会再走 AppSettings.normalize。 */
 	public AppSettings toSettings() {
-		return new AppSettings(baseUrl, model, systemPrompt, temperature, topP, topK, numCtx, numPredict,
-				repeatPenalty, think, webEnabled, webProvider, webSearchUrl, webMaxResults, webFetch, webMaxRounds,
-				ragEnabled, embeddingModel, ragTopK);
+		return new AppSettings(baseUrl, model, systemPrompt, temperature, topP, topK, numCtx, numPredict, repeatPenalty,
+				think, webEnabled, webProvider, webSearchUrl, webMaxResults, webFetch, webMaxRounds, ragEnabled,
+				embeddingModel, ragTopK, codeEnabled, codeWorkspace, codeTimeoutSeconds, codeMaxRounds);
 	}
 
 	public String getBaseUrl() {
@@ -207,6 +215,38 @@ public class OllamaDefaults {
 
 	public void setRagTopK(int ragTopK) {
 		this.ragTopK = ragTopK;
+	}
+
+	public boolean isCodeEnabled() {
+		return codeEnabled;
+	}
+
+	public void setCodeEnabled(boolean codeEnabled) {
+		this.codeEnabled = codeEnabled;
+	}
+
+	public String getCodeWorkspace() {
+		return codeWorkspace;
+	}
+
+	public void setCodeWorkspace(String codeWorkspace) {
+		this.codeWorkspace = codeWorkspace;
+	}
+
+	public int getCodeTimeoutSeconds() {
+		return codeTimeoutSeconds;
+	}
+
+	public void setCodeTimeoutSeconds(int codeTimeoutSeconds) {
+		this.codeTimeoutSeconds = codeTimeoutSeconds;
+	}
+
+	public int getCodeMaxRounds() {
+		return codeMaxRounds;
+	}
+
+	public void setCodeMaxRounds(int codeMaxRounds) {
+		this.codeMaxRounds = codeMaxRounds;
 	}
 
 }

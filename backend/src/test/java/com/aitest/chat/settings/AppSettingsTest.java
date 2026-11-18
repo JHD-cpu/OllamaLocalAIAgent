@@ -30,17 +30,18 @@ class AppSettingsTest {
 	void rejectsMissingWebFields() {
 		assertThrows(IllegalArgumentException.class,
 				() -> AppSettings.normalize(new AppSettings("http://127.0.0.1:11434", "qwen3.5:9b", "你好", 0.7, 0.9, 40,
-						8192, -1, 1.1, false, false, null, null, 0, true, 0, false, "bge-m3", 4)));
+						8192, -1, 1.1, false, false, null, null, 0, true, 0, false, "bge-m3", 4, false,
+						"data/workspace", 20, 6)));
 	}
 
-	/** 嵌入模型名会去掉空白，检索条数只允许 1 到 8。 */
+	/** 嵌入模型名会去掉空白，检索条数至少为 1。 */
 	@Test
 	void rejectsRagTopKOutOfRange() {
 		assertThrows(IllegalArgumentException.class, () -> AppSettings.normalize(sample("http://127.0.0.1:11434",
 				"qwen3.5:9b", 0.7, 0)));
 		AppSettings settings = AppSettings.normalize(new AppSettings("http://127.0.0.1:11434", "qwen3.5:9b", "你好", 0.7,
 				0.9, 40, 8192, -1, 1.1, false, false, "bing", "http://127.0.0.1:8888", 5, true, 3, true, " bge-m3 ",
-				4));
+				4, false, "data/workspace", 20, 6));
 		assertEquals("bge-m3", settings.embeddingModel());
 		assertEquals(4, settings.ragTopK());
 	}
@@ -52,7 +53,7 @@ class AppSettingsTest {
 
 	private AppSettings sample(String baseUrl, String model, double temperature, int ragTopK) {
 		return new AppSettings(baseUrl, model, "你好", temperature, 0.9, 40, 8192, -1, 1.1, false, false, "bing",
-				"http://127.0.0.1:8888", 5, true, 3, false, "bge-m3", ragTopK);
+				"http://127.0.0.1:8888", 5, true, 3, false, "bge-m3", ragTopK, false, "data/workspace", 20, 6);
 	}
 
 }

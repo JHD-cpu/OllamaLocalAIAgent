@@ -2,28 +2,29 @@ server:
   address: 127.0.0.1
   port: 8080
 
+logging:
+  level:
+    com.aitest.chat: INFO
+
 spring:
   application:
     name: ollama-chat
   datasource:
-    url: jdbc:mysql://127.0.0.1:3306/aitest_rag?createDatabaseIfNotExist=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
-    username: root
-    password: "123456"
+    url: jdbc:sqlite:data/rag.db
+    driver-class-name: org.sqlite.JDBC
     hikari:
-      connection-timeout: 3000
-      maximum-pool-size: 5
+      maximum-pool-size: 1
+      connection-init-sql: PRAGMA foreign_keys=ON
 
 app:
   settings-file: data/settings.json
+  software-file: data/installed-software.json
   rag:
-    text-dir: F:/aitest-knowledge
-    paddle-python: C:/Users/Administrator/AppData/Local/Programs/Python/Python310/python.exe
+    text-dir: data/knowledge
+    paddle-python: python
     paddle-script: scripts/paddle_ocr.py
-    qdrant-host: 127.0.0.1
-    qdrant-port: 6334
-    collection: knowledge
+    vector-store-file: data/vectors.json
     embedding-dimensions: 1024
-    max-upload-bytes: 20971520
     chunk-max-chars: 1000
     breakpoint-percentile: 90
     ocr-min-chars: 20
@@ -47,3 +48,7 @@ app:
     rag-enabled: false
     embedding-model: bge-m3
     rag-top-k: 4
+    code-enabled: false
+    code-workspace: data/workspace
+    code-timeout-seconds: 20
+    code-max-rounds: 6
