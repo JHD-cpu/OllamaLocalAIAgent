@@ -1,8 +1,10 @@
 package com.aitest.chat.settings;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -108,14 +110,21 @@ public class SettingsService {
 		return merged;
 	}
 
-	/** 必要时创建目录，再把配置格式化写成 JSON。写失败时抛出，调用方不会更新内存。 */
+	/** 原子写入：先写临时文件再 replace，避免中途断电留下半截 JSON。 */
 	private void persist(AppSettings settings) {
 		try {
 			Path parent = this.settingsFile.getParent();
 			if (parent != null) {
 				Files.createDirectories(parent);
 			}
-			this.jsonMapper.writerWithDefaultPrettyPrinter().writeValue(this.settingsFile.toFile(), settings);
+			Path temp = this.settingsFile.resolveSibling(this.settingsFile.getFileName() + ".tmp");
+			this.jsonMapper.writerWithDefaultPrettyPrinter().writeValue(temp.toFile(), settings);
+			try {
+				Files.move(temp, this.settingsFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+			}
+			catch (AtomicMoveNotSupportedException ex) {
+				Files.move(temp, this.settingsFile, StandardCopyOption.REPLACE_EXISTING);
+			}
 		}
 		catch (IOException ex) {
 			throw new IllegalStateException("保存配置失败", ex);

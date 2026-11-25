@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   ChatDotRound,
   Collection,
@@ -111,12 +111,45 @@ watch(chatError, (value) => {
   }
 })
 
+const knowledgeFocus = ref(null)
+let knowledgeChannel = null
+
+function onKnowledgeNav(payload) {
+  if (!payload || payload.type !== 'open-knowledge-doc' || !payload.documentId) {
+    return
+  }
+  knowledgeFocus.value = {
+    documentId: payload.documentId,
+    chunkId: payload.chunkId || null,
+    at: Date.now()
+  }
+  view.value = 'knowledge'
+}
+
 onMounted(async () => {
   try {
     await load()
     if (!graphOnly.value) {
       await refreshInfo()
       await loadSessions()
+      try {
+        knowledgeChannel = new BroadcastChannel('ollama-knowledge')
+        knowledgeChannel.onmessage = (event) => onKnowledgeNav(event.data)
+      } catch {
+        /* ignore */
+      }
+      try {
+        const raw = localStorage.getItem('ollama-knowledge-nav')
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (parsed?.at && Date.now() - parsed.at < 15000) {
+            onKnowledgeNav(parsed)
+          }
+          localStorage.removeItem('ollama-knowledge-nav')
+        }
+      } catch {
+        /* ignore */
+      }
     }
     try {
       const log = await getLogInfo()
@@ -130,6 +163,10 @@ onMounted(async () => {
     loadError.value = error.message
     info.value = { ok: false, version: '', message: error.message, models: [] }
   }
+})
+
+onUnmounted(() => {
+  knowledgeChannel?.close()
 })
 
 async function onSave() {
@@ -275,7 +312,7 @@ function onCreateSession() {
           @regenerate="onRegenerate"
           @export="onExport"
         />
-        <KnowledgePane v-else />
+        <KnowledgePane v-else :focus="knowledgeFocus" />
       </template>
     </main>
   </div>

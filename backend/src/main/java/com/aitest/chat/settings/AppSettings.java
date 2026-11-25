@@ -88,6 +88,8 @@ public record AppSettings(String llmProvider, String apiKey, String baseUrl, Str
 		if (raw.ragTopK() < 1) {
 			throw new IllegalArgumentException("知识库检索条数至少为 1");
 		}
+		// 旧配置可能是 40；硬顶 12，避免一次检索撑爆上下文
+		int ragTopK = Math.min(12, raw.ragTopK());
 		String codeWorkspace = raw.codeWorkspace() == null ? "" : raw.codeWorkspace().trim();
 		if (codeWorkspace.isEmpty() || codeWorkspace.length() > 260) {
 			throw new IllegalArgumentException("代码工作区路径不正确");
@@ -101,7 +103,7 @@ public record AppSettings(String llmProvider, String apiKey, String baseUrl, Str
 		return new AppSettings(provider.id(), apiKey, baseUrl, model, systemPrompt, raw.temperature(), raw.topP(),
 				raw.topK(), raw.numCtx(), raw.numPredict(), raw.repeatPenalty(), raw.think(), raw.webEnabled(),
 				webProvider, webSearchUrl, raw.webMaxResults(), raw.webFetch(), raw.webMaxRounds(), raw.ragEnabled(),
-				embeddingModel, raw.ragTopK(), raw.codeEnabled(), codeWorkspace, raw.codeTimeoutSeconds(),
+				embeddingModel, ragTopK, raw.codeEnabled(), codeWorkspace, raw.codeTimeoutSeconds(),
 				raw.codeMaxRounds());
 	}
 

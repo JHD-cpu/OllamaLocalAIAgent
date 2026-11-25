@@ -172,7 +172,7 @@ function onProviderChange(id) {
                 </el-col>
                 <el-col :span="10">
                   <el-form-item label="检索条数">
-                    <el-input-number v-model="form.ragTopK" :min="1" :disabled="!form.ragEnabled" controls-position="right" />
+                    <el-input-number v-model="form.ragTopK" :min="1" :max="12" :disabled="!form.ragEnabled" controls-position="right" />
                   </el-form-item>
                 </el-col>
               </el-row>

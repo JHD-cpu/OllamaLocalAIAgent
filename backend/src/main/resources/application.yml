@@ -54,7 +54,7 @@ app:
     web-max-rounds: 3
     rag-enabled: false
     embedding-model: bge-m3
-    rag-top-k: 4
+    rag-top-k: 6
     code-enabled: false
     code-workspace: data/workspace
     code-timeout-seconds: 20

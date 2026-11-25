@@ -106,7 +106,9 @@ async function prepareOutboundMedia(media) {
       continue
     }
     await uploadDocument(file)
-    notes.push(`已上传知识库并排队解析：${item.name}。请结合知识库回答（请开启「知识库」检索）。`)
+    notes.push(
+      `已上传知识库并排队解析：${item.name}。文档变为「就绪」前检索可能搜不到；请开启「知识库」并稍后再问。`
+    )
     attachmentMeta.push({ name: item.name, kind: 'file' })
   }
   return { imageUrls, notes, attachmentMeta }

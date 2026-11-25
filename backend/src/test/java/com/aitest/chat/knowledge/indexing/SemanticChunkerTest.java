@@ -70,6 +70,18 @@ class SemanticChunkerTest {
 		assertFalse(SemanticChunker.isSectionHeader("负责对话流程设计与知识库接入。"));
 	}
 
+	@Test
+	void packsTinyChunksKeepsKnowledgeHeaders() {
+		List<String> packed = SemanticChunker.pack(List.of(
+			"【主题】教育背景\n某某大学",
+			"【主题】项目经历\n【子主题】智能客服\n负责对话",
+			"短句。"
+		), 4000, 900);
+		assertTrue(packed.stream().anyMatch(c -> c.startsWith("【主题】教育背景")));
+		assertTrue(packed.stream().anyMatch(c -> c.startsWith("【主题】项目经历")));
+		assertFalse(packed.stream().anyMatch(c -> c.contains("【主题】教育背景") && c.contains("【主题】项目经历")));
+	}
+
 	private static List<float[]> embed(List<String> sentences) {
 		return sentences.stream()
 			.map(sentence -> sentence.contains("股价") || sentence.contains("指数") ? new float[] { 0, 1 }

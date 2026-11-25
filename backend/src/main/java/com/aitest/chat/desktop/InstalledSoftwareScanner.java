@@ -240,6 +240,8 @@ public final class InstalledSoftwareScanner {
       return lower.contains("\\package cache\\")
          || lower.contains("\\installer\\")
          || lower.contains("\\uninstall")
+         || lower.endsWith("uninstall.exe")
+         || lower.endsWith("unins000.exe")
          || lower.endsWith("setup.exe")
          || lower.contains("-amd64.exe")
          || lower.contains("-arm64.exe")
@@ -265,6 +267,9 @@ public final class InstalledSoftwareScanner {
                String location = string(root, sub, "InstallLocation");
                String icon = string(root, sub, "DisplayIcon");
                String exe = exeFromIcon(icon);
+               if (!blank(exe) && isInstallerPath(exe)) {
+                  exe = null;
+               }
                if (blank(location) && !blank(exe)) {
                   location = parentOrEmpty(Path.of(exe));
                }

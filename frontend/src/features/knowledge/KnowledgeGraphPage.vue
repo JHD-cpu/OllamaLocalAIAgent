@@ -61,6 +61,33 @@ function onSelectGraphChunk(chunk) {
   popupChunk.value = chunk
   popupOpen.value = true
 }
+
+/** 通知主窗口打开对应文档分片。 */
+function openInMainWindow() {
+  const chunk = popupChunk.value
+  if (!chunk?.documentId) {
+    return
+  }
+  const payload = {
+    type: 'open-knowledge-doc',
+    documentId: chunk.documentId,
+    chunkId: chunk.id || chunk.chunkIds?.[0] || null,
+    filename: chunk.filename || chunk.label || ''
+  }
+  try {
+    const channel = new BroadcastChannel('ollama-knowledge')
+    channel.postMessage(payload)
+    channel.close()
+  } catch {
+    /* ignore */
+  }
+  try {
+    localStorage.setItem('ollama-knowledge-nav', JSON.stringify({ ...payload, at: Date.now() }))
+  } catch {
+    /* ignore */
+  }
+  popupOpen.value = false
+}
 </script>
 
 <template>
@@ -90,6 +117,16 @@ function onSelectGraphChunk(chunk) {
         · {{ popupChunk.charCount ?? 0 }} 字
       </p>
       <pre class="knowledge-popup-text">{{ popupChunk?.text || '' }}</pre>
+      <template #footer>
+        <el-button @click="popupOpen = false">关闭</el-button>
+        <el-button
+          v-if="popupChunk?.documentId"
+          type="primary"
+          @click="openInMainWindow"
+        >
+          在知识库定位
+        </el-button>
+      </template>
     </el-dialog>
   </section>
 </template>

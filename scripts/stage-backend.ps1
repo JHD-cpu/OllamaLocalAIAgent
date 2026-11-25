@@ -27,6 +27,8 @@ if (-not (Test-Path "dist\index.html")) {
 }
 
 Set-Location (Join-Path $Root "backend")
+& .\mvnw.cmd -q test
+if ($LASTEXITCODE -ne 0) { throw "mvn test failed: $LASTEXITCODE" }
 & .\mvnw.cmd -q -Pinstaller package -DskipTests
 if ($LASTEXITCODE -ne 0) { throw "mvn package failed: $LASTEXITCODE" }
 $jar = Join-Path $Root "backend\target\ollama-chat-0.0.1-SNAPSHOT.jar"

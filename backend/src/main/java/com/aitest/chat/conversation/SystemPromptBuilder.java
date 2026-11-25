@@ -51,7 +51,11 @@ public class SystemPromptBuilder {
 				"打开本机程序时优先调用 open_app（按名称匹配）。需要看屏幕时调用 take_screenshot。跨会话要记住的用户偏好或事实，用 memory_save / memory_search。");
 		if (settings.codeEnabled()) {
 			text.append("\n\n").append(
-					"你运行在主人的 Windows 电脑上，可以执行 cmd。打开其它本机程序时优先 open_app；复杂命令再用 run_cmd。不要说自己无法操作电脑。写代码、改文件时使用 create_file、write_file、read_file、run_file、run_cmd，文件路径相对于工作区。");
+					"你运行在主人的 Windows 电脑上，可在工作区内读写文件并运行白名单脚本。"
+							+ "打开本机程序优先 open_app。"
+							+ "写代码、改文件用 create_file、write_file、read_file；运行脚本用 run_file（仅 .py/.js/.mjs/.ps1/.cmd/.bat）。"
+							+ "run_cmd 仅用于少量只读诊断命令，禁止格式化磁盘、改系统、下载执行、提权等危险操作。"
+							+ "不确定是否安全时先说明再征求确认，不要主动执行破坏性命令。");
 			String software = this.softwareCatalog.promptSummary();
 			if (software != null && !software.isBlank()) {
 				text.append("\n\n").append(software);

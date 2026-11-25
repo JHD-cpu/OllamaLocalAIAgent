@@ -18,8 +18,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
 
 import com.aitest.chat.desktop.deps.ManagedDepsLayout;
+import com.aitest.chat.knowledge.indexing.LlmPageOcr;
 
-/** 截取全屏并保存到应用数据目录。 */
+/** 截取全屏，保存 PNG，并用视觉模型描述内容供对话使用。 */
 public class ScreenshotTool {
 
 	private static final Logger log = LoggerFactory.getLogger(ScreenshotTool.class);
@@ -28,11 +29,14 @@ public class ScreenshotTool {
 
 	private final ManagedDepsLayout depsLayout;
 
-	public ScreenshotTool(ManagedDepsLayout depsLayout) {
+	private final LlmPageOcr vision;
+
+	public ScreenshotTool(ManagedDepsLayout depsLayout, LlmPageOcr vision) {
 		this.depsLayout = depsLayout;
+		this.vision = vision;
 	}
 
-	@Tool(name = "take_screenshot", description = "截取当前屏幕全屏画面，保存为 PNG 并返回文件路径。需要看屏幕内容时调用。")
+	@Tool(name = "take_screenshot", description = "截取当前屏幕全屏，保存 PNG，并用视觉模型描述画面内容。需要看屏幕时调用。")
 	public String takeScreenshot() {
 		if (GraphicsEnvironment.isHeadless()) {
 			return "当前环境无图形界面，无法截屏。";
@@ -44,13 +48,20 @@ public class ScreenshotTool {
 			Path dir = this.depsLayout.root().getParent() == null
 					? Path.of(System.getProperty("user.dir", ".")).resolve("screenshots")
 					: this.depsLayout.root().getParent().resolve("screenshots");
-			// 安装模式下 deps 在 %APPDATA%/OllamaChat/deps，截图放同级 screenshots
 			Files.createDirectories(dir);
 			Path file = dir.resolve("shot-" + LocalDateTime.now().format(FILE_TIME) + ".png");
 			ImageIO.write(image, "png", file.toFile());
 			log.info("截屏已保存 {}", file);
-			return "截屏已保存：" + file.toAbsolutePath().normalize()
-					+ "。若使用视觉模型，可让用户在对话中附上该图片，或说明路径。";
+			String description = this.vision == null ? "" : this.vision.describeScreen(image);
+			StringBuilder out = new StringBuilder();
+			out.append("截屏已保存：").append(file.toAbsolutePath().normalize());
+			if (description != null && !description.isBlank()) {
+				out.append("\n\n【屏幕内容】\n").append(description.trim());
+			}
+			else {
+				out.append("\n视觉描述不可用；可让用户在对话中直接粘贴该截图。");
+			}
+			return out.toString();
 		}
 		catch (Exception ex) {
 			log.warn("截屏失败：{}", ex.getMessage());

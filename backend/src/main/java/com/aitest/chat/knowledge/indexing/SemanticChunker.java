@@ -86,12 +86,24 @@ public final class SemanticChunker {
 		return result;
 	}
 
+	/** 知识点头：合并时必须作为硬边界，避免【主题】落入块中部。 */
+	static boolean isKnowledgeHeader(String line) {
+		if (line == null || line.isBlank()) {
+			return false;
+		}
+		String t = line.trim();
+		return t.startsWith("【主题】") || t.startsWith("【子主题】") || t.startsWith("【概念】");
+	}
+
 	/** 判断是否为应单独起节的标题行。 */
 	static boolean isSectionHeader(String line) {
 		if (line == null || line.isBlank()) {
 			return false;
 		}
 		String t = line.trim();
+		if (isKnowledgeHeader(t)) {
+			return true;
+		}
 		if (MARKDOWN_HEADING.matcher(t).matches()) {
 			return true;
 		}
@@ -262,12 +274,16 @@ public final class SemanticChunker {
 			String next = chunks.get(i);
 			boolean canMerge = current.length() + 1 + next.length() <= maxChars;
 			String nextFirst = firstLine(next);
-			boolean hardBreak = isSectionHeader(nextFirst) && current.length() >= minTarget;
-			boolean needMore = current.length() < minTarget || next.length() < minTarget;
-			if (canMerge && !hardBreak && needMore) {
+			// 知识点头与章节/项目标题永远硬断开，避免跨主题粘连
+			boolean hardBreak = isKnowledgeHeader(nextFirst) || isSectionHeader(nextFirst);
+			// 只吞极碎碎片，不把语义断点或完整短段重新粘回去
+			boolean nextIsFragment = isTinyFragment(next);
+			boolean needMore = current.length() < minTarget;
+			if (canMerge && !hardBreak && needMore && nextIsFragment) {
 				current.append('\n').append(next);
 			}
-			else if (canMerge && current.length() + next.length() < maxChars * 3 / 4 && next.length() < minTarget) {
+			else if (canMerge && !hardBreak && nextIsFragment
+					&& current.length() + next.length() < maxChars * 3 / 4) {
 				current.append('\n').append(next);
 			}
 			else {
@@ -285,6 +301,27 @@ public final class SemanticChunker {
 	private static String firstLine(String text) {
 		int n = text.indexOf('\n');
 		return n < 0 ? text.trim() : text.substring(0, n).trim();
+	}
+
+	/** 极碎残留（无句末标点的短段），可并入上一块；完整短句不吞。 */
+	private static boolean isTinyFragment(String text) {
+		if (text == null) {
+			return false;
+		}
+		String t = text.trim();
+		if (t.isEmpty()) {
+			return true;
+		}
+		if (t.length() >= 120) {
+			return false;
+		}
+		boolean sentenceEnd = t.endsWith("。") || t.endsWith("！") || t.endsWith("？") || t.endsWith(".")
+				|| t.endsWith("!") || t.endsWith("?") || t.endsWith("；") || t.endsWith(";");
+		// 已是完整短句：保留语义断点，不并回上一块
+		if (sentenceEnd) {
+			return false;
+		}
+		return t.length() < 80;
 	}
 
 	/** 按标点拆句并限制单句长度。 */

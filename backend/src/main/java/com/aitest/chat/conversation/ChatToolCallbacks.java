@@ -20,6 +20,7 @@ import com.aitest.chat.tools.code.CodeTools;
 import com.aitest.chat.tools.desktop.BrowserReadTool;
 import com.aitest.chat.tools.desktop.OpenAppTool;
 import com.aitest.chat.tools.desktop.OpenBrowserTool;
+import com.aitest.chat.knowledge.indexing.LlmPageOcr;
 import com.aitest.chat.tools.desktop.ScreenshotTool;
 import com.aitest.chat.tools.knowledge.KnowledgeSearchTool;
 import com.aitest.chat.tools.memory.MemoryTools;
@@ -48,9 +49,12 @@ public class ChatToolCallbacks {
 
 	private final ChatOptionsFactory optionsFactory;
 
+	private final LlmPageOcr visionOcr;
+
 	public ChatToolCallbacks(KnowledgeService knowledgeService, SearchQueryRewriter queryRewriter,
 			EmbeddedBrowserQueue browserQueue, InstalledSoftwareCatalog softwareCatalog, ManagedDepsLayout depsLayout,
-			MemoryService memoryService, McpToolBridge mcpToolBridge, ChatOptionsFactory optionsFactory) {
+			MemoryService memoryService, McpToolBridge mcpToolBridge, ChatOptionsFactory optionsFactory,
+			LlmPageOcr visionOcr) {
 		this.knowledgeService = knowledgeService;
 		this.queryRewriter = queryRewriter;
 		this.browserQueue = browserQueue;
@@ -59,6 +63,7 @@ public class ChatToolCallbacks {
 		this.memoryService = memoryService;
 		this.mcpToolBridge = mcpToolBridge;
 		this.optionsFactory = optionsFactory;
+		this.visionOcr = visionOcr;
 	}
 
 	public int toolRoundLimit(AppSettings settings) {
@@ -79,7 +84,7 @@ public class ChatToolCallbacks {
 		callbacks.addAll(List.of(ToolCallbacks.from(new OpenBrowserTool(this.browserQueue))));
 		callbacks.addAll(List.of(ToolCallbacks.from(new BrowserReadTool(this.browserQueue))));
 		callbacks.addAll(List.of(ToolCallbacks.from(new OpenAppTool(this.softwareCatalog))));
-		callbacks.addAll(List.of(ToolCallbacks.from(new ScreenshotTool(this.depsLayout))));
+		callbacks.addAll(List.of(ToolCallbacks.from(new ScreenshotTool(this.depsLayout, this.visionOcr))));
 		callbacks.addAll(List.of(ToolCallbacks.from(new MemoryTools(this.memoryService))));
 		callbacks.addAll(this.mcpToolBridge.callbacks());
 		if (settings.ragEnabled()) {

@@ -289,14 +289,15 @@ public class KnowledgeService implements DisposableBean {
          log.info("文字提取完成 id={} chars={}", id, text.length());
          List<String> chunks = this.chunker.split(document.filename(), text, progress, guard);
          log.info("建议分片完成 id={} chunks={}", id, chunks.size());
+         Path textPath;
+         List<Document> vectors = new ArrayList<>(chunks.size());
+         // 写库锁只覆盖 SQLite/文件写入；远程 embedding 放在锁外，避免堵住其它文档入库
          synchronized (this.gate) {
             guard.check();
-            progress.update(88, "写入分块与向量", chunks.size());
-            // 重新分块时先清掉残留分块行与文件，避免序号/向量叠旧数据
+            progress.update(88, "写入分块", chunks.size());
             this.repository.deleteChunksByDocument(id);
             this.textStore.deleteDerived(id);
-            Path textPath = this.textStore.writeText(id, text);
-            List<Document> vectors = new ArrayList<>();
+            textPath = this.textStore.writeText(id, text);
 
             for (int i = 0; i < chunks.size(); i++) {
                guard.check();
@@ -305,22 +306,24 @@ public class KnowledgeService implements DisposableBean {
                this.repository.insertChunk(chunkId, id, i, chunkPath.toString(), chunks.get(i).length());
                vectors.add(new Document(chunkId, chunks.get(i), Map.of("documentId", id, "chunkId", chunkId, "filename", document.filename())));
                if (i == 0 || (i + 1) % 5 == 0 || i + 1 == chunks.size()) {
-                  int pct = 88 + (int) Math.round(10.0 * (i + 1) / Math.max(1, chunks.size()));
-                  progress.update(Math.min(98, pct), "写入分块 " + (i + 1) + "/" + chunks.size(), i + 1);
+                  int pct = 88 + (int) Math.round(8.0 * (i + 1) / Math.max(1, chunks.size()));
+                  progress.update(Math.min(96, pct), "写入分块 " + (i + 1) + "/" + chunks.size(), i + 1);
                }
             }
+         }
 
-            guard.check();
-            try {
-               this.vectorStore.deleteDocument(id);
-            }
-            catch (RuntimeException ex) {
-               log.debug("写入前清理旧向量 id={}: {}", id, ex.toString());
-            }
-            sentToVectorStore = true;
-            progress.update(98, "写入向量库", chunks.size());
-            this.vectorStore.add(vectors);
-            guard.check();
+         guard.check();
+         try {
+            this.vectorStore.deleteDocument(id);
+         }
+         catch (RuntimeException ex) {
+            log.debug("写入前清理旧向量 id={}: {}", id, ex.toString());
+         }
+         sentToVectorStore = true;
+         progress.update(97, "写入向量库", chunks.size());
+         this.vectorStore.add(vectors);
+         guard.check();
+         synchronized (this.gate) {
             this.repository.markReady(id, text.length(), chunks.size(), textPath.toString());
          }
 

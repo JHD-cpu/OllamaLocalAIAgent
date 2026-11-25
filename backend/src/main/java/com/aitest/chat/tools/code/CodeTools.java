@@ -122,39 +122,90 @@ public class CodeTools {
       }
    }
 
-   /** 按扩展名选择解释器并运行工作区内文件。 */
+   private static final List<String> RUN_FILE_EXT = List.of(".py", ".js", ".mjs", ".ps1", ".cmd", ".bat");
+
+   /** 按扩展名选择解释器并运行工作区内白名单脚本。 */
    @Tool(
       name = "run_file",
-      description = "运行工作区里的文件。py 用 python，js 用 node，cmd、bat、ps1 用系统解释器，其它文件直接执行。"
+      description = "运行工作区里的脚本文件。仅支持 .py / .js / .mjs / .ps1 / .cmd / .bat。"
    )
    public String runFile(@ToolParam(description = "相对工作区的文件路径",required = true) String path) {
       try {
          Path file = this.resolve(path);
          if (!Files.isRegularFile(file)) {
             return "找不到可运行的文件：" + this.display(file);
-         } else {
-            log.info("运行文件 {}", this.display(file));
-            return this.run(this.commandFor(file));
          }
+         String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+         if (RUN_FILE_EXT.stream().noneMatch(name::endsWith)) {
+            return "只允许运行 .py/.js/.mjs/.ps1/.cmd/.bat，拒绝：" + this.display(file);
+         }
+         log.info("运行文件 {}", this.display(file));
+         return this.run(this.commandFor(file));
       } catch (RuntimeException var3) {
          return failure(var3);
       }
    }
 
-   /** 在 Windows 上经 cmd 执行单条命令（含 start 打开程序）。 */
+   /** 在工作区目录执行白名单诊断命令；危险模式一律拒绝。 */
    @Tool(
       name = "run_cmd",
-      description = "在这台 Windows 电脑上执行一条 cmd 命令。打开网站请用 open_browser，打开本机程序请优先用 open_app；本工具用于检查代码或其它命令。"
+      description = "在工作区目录执行一条只读诊断命令（如 dir、python -V）。打开网站用 open_browser，打开程序用 open_app，跑脚本用 run_file。"
    )
    public String runCmd(@ToolParam(description = "cmd 命令，例如 dir 或 python -V", required = true) String command) {
       String text = command == null ? "" : command.trim();
-      if (!text.isEmpty() && text.length() <= 2000) {
-         log.info("执行命令 {}", text.length() > 120 ? text.substring(0, 120) + "…" : text);
-         List<String> shell = windows() ? List.of("cmd.exe", "/c", "chcp 65001>nul & " + text) : List.of("sh", "-c", text);
-         return this.run(shell);
-      } else {
-         return "命令不能为空，且不能超过 2000 个字符。";
+      if (text.isEmpty() || text.length() > MAX_COMMAND) {
+         return "命令不能为空，且不能超过 " + MAX_COMMAND + " 个字符。";
       }
+      String blocked = denyReason(text);
+      if (blocked != null) {
+         log.warn("拒绝危险命令：{}", blocked);
+         return "已拒绝执行：" + blocked;
+      }
+      if (!allowlisted(text)) {
+         return "命令不在白名单。仅允许 dir/type/echo/where/whoami/python/node/npm/pip/git 等诊断命令；脚本请用 run_file。";
+      }
+      log.info("执行命令 {}", text.length() > 120 ? text.substring(0, 120) + "…" : text);
+      List<String> shell = windows() ? List.of("cmd.exe", "/c", "chcp 65001>nul & " + text) : List.of("sh", "-c", text);
+      return this.run(shell);
+   }
+
+   /** 危险模式：格式化、删盘、提权、远程下载执行等。 */
+   static String denyReason(String command) {
+      String lower = command.toLowerCase(Locale.ROOT);
+      String[] dangerous = {
+         "format ", "format\t", "diskpart", "bcdedit", "reg delete", "reg add",
+         "net user", "net localgroup", "shutdown", "powershell -enc", "frombase64",
+         "irm ", "iwr ", "invoke-webrequest", "invoke-expression", "iex ",
+         "curl .*|", "wget .*|", "start /b", "msiexec", "schtasks",
+         "del /s", "rd /s", "rmdir /s", "rm -rf", "mkfs", "dd if=",
+         ">\\\\", "\\\\.\\physicaldrive"
+      };
+      for (String pattern : dangerous) {
+         if (lower.contains(pattern)) {
+            return "包含危险模式「" + pattern.trim() + "」";
+         }
+      }
+      if (lower.contains("&") || lower.contains("|") || lower.contains(">") || lower.contains("<")
+            || lower.contains("`") || lower.contains("$(") || lower.contains("\n") || lower.contains(";")) {
+         // 允许 python -V 这类简单命令；管道/重定向一律拦
+         return "不允许管道、重定向或命令链";
+      }
+      return null;
+   }
+
+   /** 白名单：首词必须是已知安全工具。 */
+   static boolean allowlisted(String command) {
+      String first = command.trim().split("\\s+", 2)[0].toLowerCase(Locale.ROOT);
+      if (first.endsWith(".exe")) {
+         first = first.substring(0, first.length() - 4);
+      }
+      return switch (first) {
+         case "dir", "type", "echo", "where", "whoami", "ver", "cd",
+              "python", "py", "node", "npm", "npx", "pip", "pip3",
+              "git", "java", "javac", "mvn", "gradle", "dotnet",
+              "cargo", "go", "rustc", "php", "ruby" -> true;
+         default -> false;
+      };
    }
 
    /** 校验大小与路径后写入 UTF-8 文本。 */
@@ -181,19 +232,23 @@ public class CodeTools {
       return names.isEmpty() ? this.display(directory) + " 是空目录。" : this.display(directory) + "\n" + String.join("\n", names);
    }
 
-   /** 根据扩展名构造进程启动参数列表。 */
+   /** 根据扩展名构造进程启动参数列表（仅白名单扩展）。 */
    private List<String> commandFor(Path file) {
       String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
       String location = file.toString();
       if (name.endsWith(".py")) {
          return List.of("python", location);
-      } else if (name.endsWith(".js") || name.endsWith(".mjs")) {
-         return List.of("node", location);
-      } else if (name.endsWith(".ps1")) {
-         return List.of("powershell", "-NoProfile", "-File", location);
-      } else {
-         return !windows() || !name.endsWith(".cmd") && !name.endsWith(".bat") ? List.of(location) : List.of("cmd.exe", "/c", location);
       }
+      if (name.endsWith(".js") || name.endsWith(".mjs")) {
+         return List.of("node", location);
+      }
+      if (name.endsWith(".ps1")) {
+         return List.of("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", location);
+      }
+      if (name.endsWith(".cmd") || name.endsWith(".bat")) {
+         return List.of("cmd.exe", "/c", location);
+      }
+      throw new IllegalArgumentException("不支持的脚本类型：" + name);
    }
 
    /** 在工作区目录启动子进程并收集截断后的标准输出。 */

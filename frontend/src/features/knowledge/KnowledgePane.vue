@@ -2,7 +2,12 @@
 // 知识库：文档列表分页 + 分块编辑/原文预览；三维图在独立桌面弹窗。
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
-import { notifyError, notifySuccess } from '../../utils/notify.js'
+import { notifyError, notifySuccess, notifyWarn } from '../../utils/notify.js'
+
+const props = defineProps({
+  /** 图谱窗口定位：{ documentId, chunkId, at } */
+  focus: { type: Object, default: null }
+})
 import {
   addChunk,
   deleteChunk,
@@ -63,6 +68,35 @@ const pagedDocuments = computed(() => {
   const start = (page.value - 1) * pageSize
   return documents.value.slice(start, start + pageSize)
 })
+
+const processingCount = computed(
+  () => documents.value.filter((item) => item.status === 'PROCESSING').length
+)
+
+watch(
+  () => props.focus,
+  async (target) => {
+    if (!target?.documentId) {
+      return
+    }
+    await refresh()
+    const row = documents.value.find((d) => d.id === target.documentId)
+    if (!row) {
+      notifyWarn('未找到对应文档，可能已删除')
+      return
+    }
+    if (row.status !== 'READY') {
+      notifyWarn(`「${row.filename}」尚未就绪（${statusText[row.status] || row.status}），稍后再打开分片`)
+      return
+    }
+    const idx = documents.value.findIndex((d) => d.id === target.documentId)
+    if (idx >= 0) {
+      page.value = Math.floor(idx / pageSize) + 1
+    }
+    await onChunks(row)
+  },
+  { deep: true }
+)
 
 onMounted(async () => {
   await refresh()
@@ -366,6 +400,14 @@ async function onAddChunk() {
     </div>
 
     <el-alert v-if="error" type="error" :title="error" show-icon :closable="false" />
+    <el-alert
+      v-if="processingCount > 0"
+      type="warning"
+      :title="`有 ${processingCount} 个文档正在入库，就绪前对话检索可能搜不到其内容`"
+      show-icon
+      :closable="false"
+      class="knowledge-processing-hint"
+    />
 
     <div class="knowledge-list-block">
       <div class="knowledge-list-head">

@@ -9,6 +9,7 @@ import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /** 会话与消息的 SQLite 持久化。 */
 @Repository
@@ -82,7 +83,8 @@ public class ConversationRepository {
 			.list();
 	}
 
-	/** 用全量消息覆盖会话（事务式：先删后插）。 */
+	/** 用全量消息覆盖会话（事务：先删后插，失败整批回滚）。 */
+	@Transactional
 	public void replaceMessages(String sessionId, List<MessageInput> messages) {
 		if (findSession(sessionId).isEmpty()) {
 			throw new IllegalArgumentException("会话不存在");
@@ -115,16 +117,24 @@ public class ConversationRepository {
 			.update();
 	}
 
+	/** 从首条有效用户消息提炼短标题；跳过纯附件/指令噪音。 */
 	private static String deriveTitle(List<MessageInput> messages) {
 		if (messages == null) {
 			return "新对话";
 		}
 		for (MessageInput message : messages) {
-			if (message != null && "user".equals(message.role()) && message.content() != null
-					&& !message.content().isBlank()) {
-				String text = message.content().trim().replace('\n', ' ');
-				return text.length() > 40 ? text.substring(0, 40) + "…" : text;
+			if (message == null || !"user".equals(message.role()) || message.content() == null
+					|| message.content().isBlank()) {
+				continue;
 			}
+			String text = message.content().trim().replace('\n', ' ').replaceAll("\\s+", " ");
+			if (text.startsWith("[附件]") || text.startsWith("data:image") || text.length() < 2) {
+				continue;
+			}
+			if (text.length() > 36) {
+				text = text.substring(0, 36) + "…";
+			}
+			return text;
 		}
 		return "新对话";
 	}

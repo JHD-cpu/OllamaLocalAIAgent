@@ -63,8 +63,23 @@ public class LlmPageOcr implements PdfTextExtractor.PageOcr {
 		this.ollamaAdminClient = ollamaAdminClient;
 	}
 
+	private static final String SCREEN_PROMPT = """
+			请描述这张屏幕截图的主要内容：可见窗口、文字、按钮和关键状态。
+			优先摘录关键中的关键可读文字；不确定处标明「看不清」。
+			用简洁中文，不要编造看不到的内容。
+			""".strip();
+
 	@Override
 	public String read(BufferedImage image) {
+		return callVision(image, PROMPT, "pdf-page.png", true);
+	}
+
+	/** 截屏场景：用视觉模型描述界面，供对话工具回传。 */
+	public String describeScreen(BufferedImage image) {
+		return callVision(image, SCREEN_PROMPT, "screenshot.png", false);
+	}
+
+	private String callVision(BufferedImage image, String promptText, String mediaName, boolean failHard) {
 		if (image == null) {
 			return "";
 		}
@@ -76,9 +91,9 @@ public class LlmPageOcr implements PdfTextExtractor.PageOcr {
 			Media media = Media.builder()
 				.mimeType(MimeTypeUtils.IMAGE_PNG)
 				.data(png)
-				.name("pdf-page.png")
+				.name(mediaName)
 				.build();
-			UserMessage message = UserMessage.builder().text(PROMPT).media(List.of(media)).build();
+			UserMessage message = UserMessage.builder().text(promptText).media(List.of(media)).build();
 			ChatModel chatModel = this.chatModelFactory.get(settings);
 			Prompt prompt = new Prompt(List.of(message), options(settings, model));
 			ChatResponse response = chatModel.call(prompt);
@@ -86,12 +101,15 @@ public class LlmPageOcr implements PdfTextExtractor.PageOcr {
 				? ""
 				: response.getResult().getOutput().getText();
 			String cleaned = clean(text);
-			log.info("LLM OCR 完成 model={} chars={} 耗时={}ms",
+			log.info("LLM 视觉完成 model={} chars={} 耗时={}ms",
 				model, cleaned.length(), (System.nanoTime() - started) / 1_000_000L);
 			return cleaned;
 		}
 		catch (Exception ex) {
-			log.warn("LLM OCR 失败 model={}: {}", model, ex.toString());
+			log.warn("LLM 视觉失败 model={}: {}", model, ex.toString());
+			if (!failHard) {
+				return "视觉识别失败（" + model + "）：" + brief(ex);
+			}
 			throw new IllegalStateException(
 				"扫描版 PDF 识别失败（模型 " + model + "）："
 					+ brief(ex)

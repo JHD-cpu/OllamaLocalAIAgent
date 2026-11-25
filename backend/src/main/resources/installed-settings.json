@@ -17,7 +17,7 @@
   "webMaxRounds" : 20,
   "ragEnabled" : true,
   "embeddingModel" : "bge-m3",
-  "ragTopK" : 40,
+  "ragTopK" : 6,
   "codeEnabled" : true,
   "codeWorkspace" : "data/workspace",
   "codeTimeoutSeconds" : 20,

@@ -11,10 +11,13 @@ import {
   VideoPause
 } from '@element-plus/icons-vue'
 import { notifyError, notifySuccess, notifyWarn } from '../../utils/notify.js'
+import MarkdownBody from '../../components/MarkdownBody.vue'
 
 const MAX_ATTACHMENTS = 8
-const ACCEPT =
-  'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.markdown,.csv,.json,.xml,.html,.htm,.css,.js,.ts,.java,.py,.go,.rs,.c,.cpp,.h,.cs,.yml,.yaml,.toml,.log'
+/** 与知识库入库白名单对齐（图片另开选择器）。 */
+const ACCEPT_DOCS =
+  '.pdf,.txt,.md,.markdown,.docx,.xlsx,.xls,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+const DOC_EXTS = ['.pdf', '.txt', '.md', '.markdown', '.docx', '.xlsx', '.xls']
 
 const props = defineProps({
   messages: { type: Array, required: true },
@@ -161,6 +164,11 @@ function ensureDataUrlMime(dataUrl, mime) {
   return `data:${mime};base64,${dataUrl.slice(comma + 1)}`
 }
 
+function isAllowedDoc(file) {
+  const name = (file.name || '').toLowerCase()
+  return DOC_EXTS.some((ext) => name.endsWith(ext))
+}
+
 async function addFiles(fileList) {
   const files = Array.from(fileList || []).filter(Boolean)
   if (!files.length || props.streaming) {
@@ -171,9 +179,25 @@ async function addFiles(fileList) {
     notifyWarn(`最多附加 ${MAX_ATTACHMENTS} 个文件`)
     return
   }
-  const picked = files.slice(0, room)
-  if (files.length > room) {
+  const accepted = []
+  let skipped = 0
+  for (const file of files) {
+    const mime = guessMime(file)
+    if (mime.startsWith('image/') || isAllowedDoc(file)) {
+      accepted.push(file)
+    } else {
+      skipped += 1
+    }
+  }
+  if (skipped) {
+    notifyWarn(`已忽略 ${skipped} 个不支持的类型（文档仅 pdf/txt/md/docx/xlsx/xls）`)
+  }
+  const picked = accepted.slice(0, room)
+  if (accepted.length > room) {
     notifyWarn(`最多附加 ${MAX_ATTACHMENTS} 个，已忽略多余文件`)
+  }
+  if (!picked.length) {
+    return
   }
   attaching.value = true
   try {
@@ -184,7 +208,7 @@ async function addFiles(fileList) {
       dataUrl = ensureDataUrlMime(dataUrl, mime)
       next.push({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        name: file.name || '附件',
+        name: file.name || (mime.startsWith('image/') ? '截图.png' : '附件'),
         dataUrl,
         file,
         kind: mime.startsWith('image/') ? 'image' : 'file'
@@ -326,7 +350,12 @@ function toolLabel(tool) {
             </li>
           </ul>
         </div>
-        <p v-if="message.content" class="text">{{ message.content }}</p>
+        <MarkdownBody
+          v-if="message.content"
+          class="text"
+          :text="message.content"
+          :plain="message.role === 'user'"
+        />
         <p v-else-if="isPending(message, index)" class="pending-line">
           <span class="pending-pulse" />
           正在执行…
@@ -467,7 +496,7 @@ function toolLabel(tool) {
       </div>
 
       <input ref="imageInput" type="file" accept="image/*" multiple hidden @change="onPickImages" />
-      <input ref="fileInput" type="file" :accept="ACCEPT" multiple hidden @change="onPickFiles" />
+      <input ref="fileInput" type="file" :accept="ACCEPT_DOCS" multiple hidden @change="onPickFiles" />
     </form>
   </section>
 </template>

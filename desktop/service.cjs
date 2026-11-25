@@ -242,13 +242,21 @@ function portInUse(port) {
   })
 }
 
-/** 通过 PowerShell 结束占用指定端口的进程 */
+/** 只结束占用端口且命令行像本应用 Java 服务的进程，避免误杀其它程序 */
 async function killPort(port) {
   await new Promise((resolve) => {
     const finder = spawn('powershell.exe', [
       '-NoProfile',
       '-Command',
-      `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }`
+      `$conns = Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue;`
+        + `foreach ($c in $conns) {`
+        + `  $p = Get-CimInstance Win32_Process -Filter ("ProcessId=" + $c.OwningProcess) -ErrorAction SilentlyContinue;`
+        + `  if ($null -eq $p) { continue };`
+        + `  $cmd = [string]$p.CommandLine;`
+        + `  if ($cmd -match 'ollama-chat|OllamaChat|spring-boot:run|aitest\\.chat') {`
+        + `    Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue`
+        + `  }`
+        + `}`
     ], { windowsHide: true, stdio: 'ignore' })
     finder.on('exit', () => resolve())
     finder.on('error', () => resolve())
